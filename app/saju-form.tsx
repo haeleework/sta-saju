@@ -1,0 +1,457 @@
+"use client";
+
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { calculate, InputError, type SajuChart, type SajuInput } from "../lib/saju/chart";
+import { describeElementDistribution, ELEMENT_ORDER, getChartCells, type Element } from "../lib/saju/chart-presentation";
+import { analyzeDayMaster } from "../lib/saju/strength";
+import {
+  isSajuChart,
+  parseBaseReading,
+  parseTopicReading,
+  READING_TOPICS,
+  type BaseReading,
+  type ReadingRequest,
+  type ReadingTopic,
+} from "../lib/saju/reading";
+import {
+  loadSavedReadings,
+  writeSavedReadings,
+  withoutSavedReading,
+  type SavedReading,
+} from "../lib/saju/reading-storage";
+
+const topics = [
+  { id: "strength", name: "성격·강점", hint: "나를 이해하는 단서" },
+  { id: "relationship", name: "연애·관계", hint: "관계를 바라보는 질문" },
+  { id: "career", name: "일·진로", hint: "일의 방향에 대한 고민" },
+  { id: "money", name: "재물", hint: "돈과 선택에 관한 관심" },
+] as const;
+
+const elementClass: Record<Element, string> = {
+  목: "wood", 화: "fire", 토: "earth", 금: "metal", 수: "water",
+};
+
+type BirthInput = Pick<SajuInput, "date" | "time">;
+type Pending = "base" | "topic" | null;
+
+async function requestReading(input: ReadingRequest): Promise<{ chart: SajuChart; reading: unknown }> {
+  let response: Response;
+  try {
+    response = await fetch("/api/reading", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  } catch {
+    throw new Error("해석 서비스에 연결하지 못했습니다. 다시 시도해 주세요.");
+  }
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("해석 서비스의 응답을 확인할 수 없습니다. 다시 시도해 주세요.");
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("해석 서비스의 응답을 확인할 수 없습니다.");
+  }
+  const result = data as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(typeof result.error === "string" ? result.error : "해석을 만들지 못했습니다. 다시 시도해 주세요.");
+  }
+  if (!isSajuChart(result.chart)) throw new Error("계산 결과를 확인할 수 없습니다. 다시 시도해 주세요.");
+  return { chart: result.chart, reading: result.reading };
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : "해석을 만들지 못했습니다. 다시 시도해 주세요.";
+}
+
+export default function SajuForm({ readingDisabled = false }: { readingDisabled?: boolean }) {
+  const [chart, setChart] = useState<SajuChart | null>(null);
+  const [birthInput, setBirthInput] = useState<BirthInput | null>(null);
+  const [currentEntry, setCurrentEntry] = useState<SavedReading | null>(null);
+  const [selectedTopic, setSelectedTopic] = useState<ReadingTopic | null>(null);
+  const [savedReadings, setSavedReadings] = useState<SavedReading[]>([]);
+  const [storageNotice, setStorageNotice] = useState("");
+  const [error, setError] = useState("");
+  const [baseError, setBaseError] = useState("");
+  const [topicError, setTopicError] = useState("");
+  const [pending, setPending] = useState<Pending>(null);
+  const savedRef = useRef<SavedReading[]>([]);
+  const storageBlocked = useRef(false);
+  const pendingRef = useRef(false);
+  const requestSequence = useRef(0);
+
+  useEffect(() => {
+    try {
+      const loaded = loadSavedReadings(window.localStorage);
+      savedRef.current = loaded.entries;
+      storageBlocked.current = Boolean(loaded.error);
+      setSavedReadings(loaded.entries);
+      if (loaded.error) setStorageNotice(loaded.error);
+    } catch {
+      storageBlocked.current = true;
+      setStorageNotice("이 브라우저에서는 결과 저장을 사용할 수 없습니다.");
+    }
+  }, []);
+
+  function persistEntry(entry: SavedReading) {
+    setCurrentEntry(entry);
+    if (storageBlocked.current) {
+      setStorageNotice("해석은 표시되지만 저장되지 않았습니다. 브라우저 저장 공간을 확인해 주세요.");
+      return;
+    }
+    try {
+      const next = [entry, ...savedRef.current.filter((item) => item.id !== entry.id)];
+      if (!writeSavedReadings(window.localStorage, next)) throw new Error("Write failed");
+      savedRef.current = next;
+      setSavedReadings(next);
+      setStorageNotice("이 브라우저에 결과를 저장했습니다.");
+    } catch {
+      setStorageNotice("해석은 표시되지만 저장되지 않았습니다. 브라우저 저장 공간을 확인해 주세요.");
+    }
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    requestSequence.current += 1;
+    pendingRef.current = false;
+    setPending(null);
+    const data = new FormData(event.currentTarget);
+    const input: SajuInput = {
+      date: String(data.get("date") || ""),
+      time: String(data.get("time") || ""),
+      calendar: "solar",
+      topic: "general",
+      question: "",
+    };
+    setBirthInput(null);
+    setCurrentEntry(null);
+    setSelectedTopic(null);
+    setBaseError("");
+    setTopicError("");
+    setStorageNotice("");
+
+    try {
+      setChart(calculate(input));
+      setBirthInput({ date: input.date, time: input.time });
+      setError("");
+    } catch (caught) {
+      setChart(null);
+      setError(caught instanceof InputError ? caught.message : "계산하지 못했습니다. 입력을 확인해 주세요.");
+    }
+  }
+
+  async function handleBaseReading() {
+    if (!birthInput || pendingRef.current || readingDisabled) return;
+    pendingRef.current = true;
+    const sequence = ++requestSequence.current;
+    setPending("base");
+    setBaseError("");
+    try {
+      const response = await requestReading({ ...birthInput, kind: "base" });
+      if (sequence !== requestSequence.current) return;
+      const base = parseBaseReading(response.reading);
+      if (!base) throw new Error("해석 결과 형식이 올바르지 않습니다. 다시 시도해 주세요.");
+      const entry: SavedReading = {
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        chart: response.chart,
+        base,
+        topics: {},
+      };
+      setChart(response.chart);
+      setSelectedTopic(null);
+      persistEntry(entry);
+    } catch (caught) {
+      if (sequence === requestSequence.current) setBaseError(message(caught));
+    } finally {
+      if (sequence === requestSequence.current) {
+        pendingRef.current = false;
+        setPending(null);
+      }
+    }
+  }
+
+  async function handleTopicSelection(topic: ReadingTopic) {
+    if (pendingRef.current) return;
+    setSelectedTopic(topic);
+    setTopicError("");
+    if (!currentEntry) {
+      setTopicError("먼저 기본 해석을 만들어 주세요.");
+      return;
+    }
+    if (currentEntry.topics[topic]) return;
+    if (readingDisabled) {
+      setTopicError("로그인 시험 중에는 새 AI 해석을 만들지 않습니다.");
+      return;
+    }
+    if (!birthInput) {
+      setTopicError("새 주제의 해석을 만들려면 생년월일과 출생시간을 다시 입력해 주세요. 저장된 결과는 그대로 남아 있습니다.");
+      return;
+    }
+
+    pendingRef.current = true;
+    const sequence = ++requestSequence.current;
+    setPending("topic");
+    try {
+      const response = await requestReading({ ...birthInput, kind: "topic", topic });
+      if (sequence !== requestSequence.current) return;
+      const reading = parseTopicReading(response.reading, topic);
+      if (!reading) throw new Error("주제 해석 결과 형식이 올바르지 않습니다. 다시 시도해 주세요.");
+      persistEntry({ ...currentEntry, topics: { ...currentEntry.topics, [topic]: reading } });
+    } catch (caught) {
+      if (sequence === requestSequence.current) setTopicError(message(caught));
+    } finally {
+      if (sequence === requestSequence.current) {
+        pendingRef.current = false;
+        setPending(null);
+      }
+    }
+  }
+
+  function handleOpenSaved(entry: SavedReading) {
+    requestSequence.current += 1;
+    pendingRef.current = false;
+    setPending(null);
+    setChart(entry.chart);
+    setBirthInput(null);
+    setCurrentEntry(entry);
+    setSelectedTopic(null);
+    setError("");
+    setBaseError("");
+    setTopicError("");
+    setStorageNotice("저장한 결과를 열었습니다. 새 주제 해석에는 출생 정보를 다시 입력해야 합니다.");
+  }
+
+  function handleDeleteSaved(entry: SavedReading) {
+    const label = `${new Date(entry.createdAt).toLocaleString("ko-KR")}에 저장한 ${entry.chart.pillars[2].korean} 결과`;
+    if (!window.confirm(`${label}를 이 브라우저에서 삭제할까요?`)) return;
+    try {
+      const next = withoutSavedReading(savedRef.current, entry.id);
+      if (!writeSavedReadings(window.localStorage, next)) throw new Error("Write failed");
+      savedRef.current = next;
+      setSavedReadings(next);
+      if (currentEntry?.id === entry.id) {
+        setCurrentEntry(null);
+        setChart(null);
+        setBirthInput(null);
+        setSelectedTopic(null);
+      }
+      setStorageNotice("선택한 저장 결과를 삭제했습니다.");
+    } catch {
+      setStorageNotice("저장 결과를 삭제하지 못했습니다. 다시 시도해 주세요.");
+    }
+  }
+
+  const baseReading: BaseReading | null = currentEntry?.base ?? null;
+  const selectedReading = selectedTopic ? currentEntry?.topics[selectedTopic] : null;
+  const assessment = chart ? analyzeDayMaster(chart) : null;
+  const chartCells = chart ? getChartCells(chart) : [];
+
+  return (
+    <div className="journey">
+      <section className="step-section" aria-labelledby="input-title">
+        <div className="step-heading">
+          <span className="step-number">01</span>
+          <div>
+            <p className="step-kicker">먼저, 기본 정보</p>
+            <h2 id="input-title">언제 태어나셨나요?</h2>
+          </div>
+        </div>
+        <div className="input-card">
+          <p className="form-intro">양력 생년월일과 태어난 시간을 입력해 주세요. 현재는 출생시간을 아는 경우만 계산할 수 있습니다.</p>
+          <form onSubmit={handleSubmit}>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="date">생년월일</label>
+                <input id="date" name="date" type="date" min="1990-01-01" required />
+                <small>양력 · 1990년 이후</small>
+              </div>
+              <div className="field">
+                <label htmlFor="time">출생시간</label>
+                <input id="time" name="time" type="time" required />
+                <small>시·분을 선택해 주세요</small>
+              </div>
+            </div>
+            <button className="primary-button" type="submit">
+              기본 사주 확인하기 <span aria-hidden="true">→</span>
+            </button>
+          </form>
+          {error && <p className="error" role="alert">{error}</p>}
+        </div>
+      </section>
+
+      {chart && (
+        <>
+          <section className="step-section" aria-labelledby="result-title">
+            <div className="step-heading">
+              <span className="step-number">02</span>
+              <div>
+                <p className="step-kicker">계산된 기본 정보</p>
+                <h2 id="result-title">나의 사주 구성</h2>
+              </div>
+            </div>
+            <div className="result-card">
+              <p className="chart-intro">네 기둥의 윗글자와 아랫글자를 각각 한 칸에 담았습니다. <strong>일주 윗글자</strong>가 나를 대표하는 일간입니다.</p>
+              <div className="chart-column-headings" aria-hidden="true">
+                {chart.pillars.map((pillar) => <span key={pillar.label}>{pillar.label}</span>)}
+              </div>
+              <p className="chart-row-label">윗글자 · 천간</p>
+              <div className="chart-character-row" aria-label="사주 윗글자 네 칸">
+                {chartCells.slice(0, 4).map((cell) => (
+                  <div className={`chart-character element-${elementClass[cell.element]}${cell.pillarLabel === "일주" ? " is-day-master" : ""}`} key={`${cell.pillarLabel}-${cell.position}`} aria-label={`${cell.pillarLabel} 윗글자 ${cell.character} ${cell.korean} ${cell.element}`}>
+                    <span className="chart-hanja">{cell.character}</span>
+                    <span className="chart-hangul">{cell.korean}</span>
+                    <span className="chart-element-name">{cell.element}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="chart-row-label">아랫글자 · 지지</p>
+              <div className="chart-character-row" aria-label="사주 아랫글자 네 칸">
+                {chartCells.slice(4).map((cell) => (
+                  <div className={`chart-character element-${elementClass[cell.element]}`} key={`${cell.pillarLabel}-${cell.position}`} aria-label={`${cell.pillarLabel} 아랫글자 ${cell.character} ${cell.korean} ${cell.element}`}>
+                    <span className="chart-hanja">{cell.character}</span>
+                    <span className="chart-hangul">{cell.korean}</span>
+                    <span className="chart-element-name">{cell.element}</span>
+                  </div>
+                ))}
+              </div>
+              <section className="element-distribution" aria-labelledby="element-distribution-title">
+                <h3 id="element-distribution-title">다섯 기운이 보이는 모습</h3>
+                <p>오행은 나무·불·흙·쇠·물처럼 서로 다른 성질을 가리킵니다. 막대는 여덟 글자에서 보이는 개수입니다.</p>
+                <div className="element-bars">
+                  {ELEMENT_ORDER.map((element) => (
+                    <div className="element-bar-row" key={element}>
+                      <span className="element-bar-label">{element}</span>
+                      <div className="element-bar-track" role="meter" aria-label={`${element} 오행`} aria-valuemin={0} aria-valuemax={8} aria-valuenow={chart.elements[element]}>
+                        <div className={`element-bar-fill element-${elementClass[element]}`} style={{ width: `${chart.elements[element] / 8 * 100}%` }} />
+                      </div>
+                      <span className="element-bar-count">{chart.elements[element]}개</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="distribution-note">지지의 숨은 글자와 태어난 계절의 가중치는 이 막대에 넣지 않았습니다. 개수만으로 강약이나 성격이 정해지지는 않습니다.</p>
+                <div className="distribution-reading">
+                  <strong>이 구성을 어떻게 읽을까요?</strong>
+                  <p>{describeElementDistribution(chart)}</p>
+                </div>
+              </section>
+              {assessment && (
+                <details className="assessment" aria-label="일간 뒷받침 계산 근거">
+                  <summary>판단에 사용한 계산 근거 살펴보기</summary>
+                  <h3>나를 대표하는 글자의 뒷받침</h3>
+                  <p>일간은 나를 대표하는 한 글자입니다. 아래는 전통 명리 규칙을 간단히 적용한 첫 판단이며, 성격이나 미래를 확정하지 않습니다.</p>
+                  <strong>{assessment.verdict === "supported" ? "받쳐 주는 단서가 많습니다" : assessment.verdict === "unsupported" ? "받쳐 주는 단서가 적습니다" : "단서가 엇갈려 판단을 보류합니다"}</strong>
+                  <ul>
+                    <li>계절: 태어난 달의 글자가 나타내는 {assessment.seasonElement} 기운은 일간을 {assessment.seasonSupport ? "돕습니다" : "직접 돕지 않습니다"}.</li>
+                    <li>뿌리: 땅에 해당하는 네 글자 속의 숨은 재료(지장간)에 같은 오행이 {assessment.roots.length ? `${assessment.roots.map((root) => root.label).join("·")}에서 보입니다` : "보이지 않습니다"}.</li>
+                    <li>다른 글자: 일간을 제외한 일곱 글자 중 돕는 쪽 {assessment.visible.support}개, 기운을 쓰는 쪽 {assessment.visible.drain}개, 제어하는 쪽 {assessment.visible.control}개입니다.</li>
+                  </ul>
+                  <p className="assessment-note">숨은 재료의 세기나 글자 사이의 합·충은 아직 반영하지 않았습니다.</p>
+                </details>
+              )}
+              <p className="calculation-note">계산 기준: {chart.method}</p>
+            </div>
+          </section>
+
+          <section className="step-section" aria-labelledby="reading-title">
+            <div className="step-heading">
+              <span className="step-number">03</span>
+              <div>
+                <p className="step-kicker">Gemini가 작성하는 이야기</p>
+                <h2 id="reading-title">쉬운 말로 보는 기본 해석</h2>
+              </div>
+            </div>
+            {!baseReading && (
+              <div className="reading-callout">
+                <p>{readingDisabled ? "로그인 시험 중에는 Gemini 요청을 보내지 않습니다. 기존 저장 결과는 아래에서 볼 수 있습니다." : "버튼을 누르면 계산된 사주 구성이 Google Gemini로 전송되어 해석 문장이 만들어집니다. 원본 생년월일과 출생시간은 보내지 않습니다."}</p>
+                <button className="primary-button" type="button" disabled={readingDisabled || pending !== null || !birthInput} onClick={handleBaseReading}>
+                  {readingDisabled ? "해석 만들기 일시 중지" : pending === "base" ? "해석 만드는 중…" : "해석 만들기"}
+                </button>
+                {!birthInput && <p className="supporting-note">새 해석을 만들려면 출생 정보를 다시 입력해 주세요.</p>}
+              </div>
+            )}
+            {baseError && <p className="error" role="alert">{baseError}</p>}
+            {baseReading && (
+              <article className="reading-card" aria-label="AI 기본 해석">
+                <span className="reading-badge">AI 해석</span>
+                <p className="reading-summary">{baseReading.summary}</p>
+                <ul>{baseReading.highlights.map((item, index) => <li key={index}>{item}</li>)}</ul>
+                <p className="reading-caution">{baseReading.caution}</p>
+              </article>
+            )}
+          </section>
+
+          <section className="step-section" aria-labelledby="topic-title">
+            <div className="step-heading">
+              <span className="step-number">04</span>
+              <div>
+                <p className="step-kicker">다음으로 궁금한 것</p>
+                <h2 id="topic-title">어떤 이야기를 먼저 보고 싶으세요?</h2>
+              </div>
+            </div>
+            <p className="topic-intro">기본 해석을 만든 뒤 주제를 선택하면 자세한 해석을 볼 수 있습니다.</p>
+            <div className="topic-grid" role="group" aria-label="관심 주제 선택">
+              {topics.map((topic, index) => (
+                <button
+                  key={topic.id}
+                  type="button"
+                  className={`topic-card${selectedTopic === topic.id ? " is-selected" : ""}`}
+                  aria-pressed={selectedTopic === topic.id}
+                  disabled={pending !== null}
+                  onClick={() => handleTopicSelection(topic.id)}
+                >
+                  <span className="topic-index">0{index + 1}</span>
+                  <span className="topic-name">{topic.name}</span>
+                  <span className="topic-hint">{topic.hint}</span>
+                  <span className="topic-arrow" aria-hidden="true">↗</span>
+                </button>
+              ))}
+            </div>
+            {pending === "topic" && <p className="loading-note" role="status">{selectedTopic && READING_TOPICS[selectedTopic]} 해석을 만드는 중입니다…</p>}
+            {topicError && <p className="error" role="alert">{topicError}</p>}
+            {selectedReading && (
+              <article className="topic-preview" aria-label="AI 주제별 해석">
+                <span className="reading-badge">AI 해석 · {READING_TOPICS[selectedReading.topic]}</span>
+                <h3>{selectedReading.title}</h3>
+                <p>{selectedReading.reading}</p>
+                <p className="reflection-question">생각해 볼 질문: {selectedReading.reflectionQuestion}</p>
+              </article>
+            )}
+          </section>
+        </>
+      )}
+
+      <section className="step-section" aria-labelledby="saved-title">
+        <div className="step-heading">
+          <span className="step-number">05</span>
+          <div>
+            <p className="step-kicker">이 브라우저에 저장</p>
+            <h2 id="saved-title">지난 해석 다시 보기</h2>
+          </div>
+        </div>
+        <p className="topic-intro">성공한 해석은 이 브라우저에만 저장됩니다. 다른 기기와 동기화되지 않으며, 브라우저 데이터를 지우면 사라질 수 있습니다.</p>
+        {storageNotice && <p className="storage-notice" role="status">{storageNotice}</p>}
+        {savedReadings.length === 0 ? (
+          <div className="empty-saved">아직 저장된 해석이 없습니다.</div>
+        ) : (
+          <ul className="saved-list">
+            {savedReadings.map((entry) => (
+              <li key={entry.id}>
+                <div>
+                  <strong>{entry.chart.pillars[2].korean}일주</strong>
+                  <span>{new Date(entry.createdAt).toLocaleString("ko-KR")} 저장</span>
+                </div>
+                <div className="saved-actions">
+                  <button type="button" onClick={() => handleOpenSaved(entry)}>열기</button>
+                  <button type="button" onClick={() => handleDeleteSaved(entry)}>삭제</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
