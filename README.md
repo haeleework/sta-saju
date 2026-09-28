@@ -19,7 +19,15 @@ npm run dev
 - `AGENTS.md`: Agent가 작업할 때 따르는 기본 원칙입니다.
 - `tests/`: 자동화된 검증을 관리합니다.
 
-이번 기능의 명세는 [계정별 결과 저장](docs/specs/004-account-reading-storage.md), [십성·합충 심화 해석](docs/specs/010-ten-gods-and-pair-relations.md), [성별·대운·세운](docs/specs/011-gender-fortune-cycles.md)에 있습니다. 세 기능을 함께 사용할 때의 흐름과 남은 검증은 [통합 Spec](docs/specs/012-integrated-reading-and-account-storage.md)에 정리했습니다.
+이번 기능의 명세는 [계정별 결과 저장](docs/specs/004-account-reading-storage.md), [십성·합충 심화 해석](docs/specs/010-ten-gods-and-pair-relations.md), [성별·대운·세운](docs/specs/011-gender-fortune-cycles.md)에 있습니다. 세 기능을 함께 사용할 때의 흐름과 남은 검증은 [통합 Spec](docs/specs/012-integrated-reading-and-account-storage.md)에 정리했습니다. 매일 운세는 [오늘의 운세 Spec](docs/specs/013-daily-fortune.md)을 따릅니다.
+
+## 오늘의 운세 운영 준비
+
+1. `sta-saju` Supabase 프로젝트에는 `20260928073640_daily_fortune.sql`과 `20260928073911_daily_fortune_source_index.sql`의 변경이 적용됐습니다. 실제 서로 다른 두 계정의 접근 제한과 동시 요청은 아직 확인해야 합니다.
+2. Vercel 서버 환경변수에 `SUPABASE_SECRET_KEY`(브라우저에 절대 노출하지 않는 Supabase secret key)와 `CRON_SECRET`(예약 호출 인증값)을 설정합니다. 기존 `GEMINI_API_KEY`와 공개 Supabase URL·publishable key도 필요합니다. 값은 Git에 넣지 않습니다.
+3. 프로덕션 배포 뒤 `vercel.json`의 예약 실행과 오전 9시 이후 첫 등록, 하루 30회 상한, 다음 날 본문 정리를 실제로 확인합니다. `CRON_SECRET`이 없으면 예약 경로는 401로 닫힙니다.
+
+기존 `202609230001_create_saju_readings.sql`은 이미 운영 DB에 테이블로 존재하지만 Supabase 마이그레이션 기록에는 없습니다. 나중에 CLI `db push`를 사용하기 전, 기존 파일과 운영 DB의 기록을 먼저 맞춰야 중복 테이블 생성 오류를 피할 수 있습니다.
 
 ## 폴더 구조
 
