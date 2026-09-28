@@ -15,3 +15,4 @@ Spec을 만들면 아래 목록에 파일명을 추가합니다. 구현과 검�
 - [ ] `007-account-header.md`
 - [ ] `008-conservative-day-master-assessment.md`
 - [ ] `009-eight-character-visual-reading.md`
+- [x] `011-gender-fortune-cycles.md`
