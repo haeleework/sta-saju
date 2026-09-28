@@ -63,7 +63,7 @@ test("존재하지 않는 날짜로는 일운을 계산하지 않는다", () => 
 
 test("마이그레이션은 계정별 프로필·운세 격리와 하루 한 건을 DB에서 강제한다", () => {
   const sql = readFileSync(
-    new URL("../supabase/migrations/20260928071324_daily_fortune.sql", import.meta.url),
+    new URL("../supabase/migrations/20260928073640_daily_fortune.sql", import.meta.url),
     "utf8",
   );
 
@@ -91,7 +91,7 @@ test("마이그레이션은 계정별 프로필·운세 격리와 하루 한 건
 
 test("호출 선점과 자동 정리는 30회 상한과 지난 운세 삭제를 명시한다", () => {
   const sql = readFileSync(
-    new URL("../supabase/migrations/20260928071324_daily_fortune.sql", import.meta.url),
+    new URL("../supabase/migrations/20260928073640_daily_fortune.sql", import.meta.url),
     "utf8",
   );
 
@@ -100,4 +100,18 @@ test("호출 선점과 자동 정리는 30회 상한과 지난 운세 삭제를 
   assert.match(sql, /gemini_attempted_at/i);
   assert.match(sql, /30/);
   assert.match(sql, /on conflict\s*\(\s*user_id\s*,\s*fortune_date\s*\)/i);
+});
+
+test("저장 결과 출처 외래 키에는 NULL을 제외한 조회 인덱스를 둔다", () => {
+  const schema = readFileSync(
+    new URL("../supabase/migrations/20260928073640_daily_fortune.sql", import.meta.url),
+    "utf8",
+  );
+  const index = readFileSync(
+    new URL("../supabase/migrations/20260928073911_daily_fortune_source_index.sql", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(schema, /source_reading_id\s+bigint\s+references\s+public\.saju_readings\s*\(\s*id\s*\)\s+on\s+delete\s+set\s+null/i);
+  assert.match(index, /create\s+index\s+(?:if\s+not\s+exists\s+)?\w+\s+on\s+public\.saju_daily_profiles\s*\(\s*source_reading_id\s*\)\s+where\s+source_reading_id\s+is\s+not\s+null\s*;/i);
 });
