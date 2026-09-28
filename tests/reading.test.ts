@@ -90,6 +90,11 @@ test("Gemini 프롬프트에는 계산값만 있고 원본 날짜·시간·키�
   const prompt = buildReadingPrompt(chart, { date, time, kind: "topic", topic: "career" });
   assert.match(prompt, /관심 주제 '일·진로'/);
   assert.match(prompt, /계산 결과:/);
+  assert.match(prompt, /"advancedReading":/);
+  assert.match(prompt, /"tenGods":/);
+  assert.match(prompt, /"pairRelations":/);
+  assert.match(prompt, /값을 다시 계산하거나 제공하지 않은 삼합·방합·천간충·형·해·파를 만들어내지 마세요/);
+  assert.match(prompt, /합을 다른 오행으로 변했다고 단정하거나 합·충을 실제 사건 예언으로 쓰지 마세요/);
   assert.doesNotMatch(prompt, /2005-12-23|08:37|test-secret-key|GEMINI_API_KEY/);
 });
 
