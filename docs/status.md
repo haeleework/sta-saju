@@ -18,3 +18,4 @@ Spec을 만들면 아래 목록에 파일명을 추가합니다. 구현과 검�
 - [x] `010-ten-gods-and-pair-relations.md`
 - [x] `011-gender-fortune-cycles.md`
 - [ ] `012-integrated-reading-and-account-storage.md`
+- [ ] `013-google-account-selection.md`

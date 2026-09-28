@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AuthView } from "../app/login-test-panel";
+import { AuthView, googleSignInOptions } from "../app/login-test-panel";
 
 const child = createElement("div", { id: "saju-content" }, "사주 콘텐츠");
 const common = {
@@ -14,6 +14,17 @@ const common = {
   onSignOut: () => {},
   children: child,
 };
+
+test("구글 로그인 요청은 현재 사이트의 콜백으로 돌아오고 매번 계정 선택을 요청한다", () => {
+  assert.deepEqual(googleSignInOptions("https://sta-saju-two.vercel.app"), {
+    redirectTo: "https://sta-saju-two.vercel.app/auth/callback",
+    queryParams: { prompt: "select_account" },
+  });
+  assert.deepEqual(googleSignInOptions("http://localhost:3000"), {
+    redirectTo: "http://localhost:3000/auth/callback",
+    queryParams: { prompt: "select_account" },
+  });
+});
 
 test("로그인 후 상단바에 계정과 로그아웃이 보이고 로그인 카드는 사라진다", () => {
   const html = renderToStaticMarkup(createElement(AuthView, { ...common, state: "signed-in" }));
