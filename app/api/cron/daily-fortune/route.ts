@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   let claimed = 0;
   let ready = 0;
   let failed = 0;
-  while (true) {
+  while (offset < 300) {
     const { data: profiles, error } = await admin.from("saju_daily_profiles")
       .select("user_id,birth_date,birth_time,gender,profile_token,profile_version,source_reading_id,created_at")
       .order("created_at", { ascending: true }).order("user_id", { ascending: true })
@@ -45,5 +45,5 @@ export async function GET(request: Request) {
     const { data: usage } = await admin.from("saju_daily_usage").select("attempt_count").eq("fortune_date", today).maybeSingle();
     if (profiles.length < 30 || (usage?.attempt_count ?? 0) >= DAILY_LIMIT) break;
   }
-  return Response.json({ date: today, claimed, ready, failed }, { headers: { "Cache-Control": "no-store" } });
+  return Response.json({ date: today, claimed, ready, failed, scanLimited: offset >= 300 }, { headers: { "Cache-Control": "no-store" } });
 }
