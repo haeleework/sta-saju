@@ -5,13 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import Page from "../app/page";
 import SajuForm from "../app/saju-form";
 
-test("처음에는 양력 날짜와 출생시간을 입력하는 단계만 보인다", () => {
+test("처음에는 양력 날짜와 출생시간, 대운 방향용 성별을 입력하는 단계만 보인다", () => {
   const html = renderToStaticMarkup(createElement(SajuForm));
 
   assert.match(html, /<input[^>]*id="date"[^>]*type="date"[^>]*required/);
   assert.match(html, /<input[^>]*id="time"[^>]*type="time"[^>]*required/);
+  assert.match(html, /<select[^>]*id="gender"[^>]*name="gender"[^>]*required/);
+  assert.match(html, /성별은 전통 규칙에 따라 대운의 진행 방향을 정할 때만 사용합니다/);
   assert.match(html, /type="submit"[^>]*>기본 사주 확인하기/);
-  assert.match(html, /현재는 출생시간을/);
   assert.doesNotMatch(html, /나의 사주 구성/);
   assert.doesNotMatch(html, /관심 주제 선택/);
 });

@@ -5,6 +5,12 @@ import { calculate, InputError, type SajuChart, type SajuInput } from "../lib/sa
 import { describeElementDistribution, ELEMENT_ORDER, getChartCells, type Element } from "../lib/saju/chart-presentation";
 import { analyzeDayMaster } from "../lib/saju/strength";
 import {
+  calculateFortuneCycles,
+  type FortuneCycles,
+  type FortuneGender,
+  type FortuneRelation,
+} from "../lib/saju/fortune-cycles";
+import {
   isSajuChart,
   parseBaseReading,
   parseTopicReading,
@@ -66,8 +72,28 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : "해석을 만들지 못했습니다. 다시 시도해 주세요.";
 }
 
+function relationText(relation: FortuneRelation): string {
+  return `${relation.element} 기운 · ${relation.label}`;
+}
+
+function fortuneDateText(value: string): string {
+  const [date, time] = value.split(" ");
+  const [year, month, day] = date.split("-").map(Number);
+  return `${year}년 ${month}월 ${day}일 ${time}`;
+}
+
+function offsetText(offset: FortuneCycles["startOffset"]): string {
+  return [
+    offset.years && `${offset.years}년`,
+    offset.months && `${offset.months}개월`,
+    offset.days && `${offset.days}일`,
+    offset.hours && `${offset.hours}시간`,
+  ].filter(Boolean).join(" ") || "출생 직후";
+}
+
 export default function SajuForm({ readingDisabled = false }: { readingDisabled?: boolean }) {
   const [chart, setChart] = useState<SajuChart | null>(null);
+  const [fortune, setFortune] = useState<FortuneCycles | null>(null);
   const [birthInput, setBirthInput] = useState<BirthInput | null>(null);
   const [currentEntry, setCurrentEntry] = useState<SavedReading | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<ReadingTopic | null>(null);
@@ -125,6 +151,8 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
       topic: "general",
       question: "",
     };
+    const gender = String(data.get("gender") || "") as FortuneGender;
+    setFortune(null);
     setBirthInput(null);
     setCurrentEntry(null);
     setSelectedTopic(null);
@@ -133,7 +161,13 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
     setStorageNotice("");
 
     try {
-      setChart(calculate(input));
+      const nextChart = calculate(input);
+      const nextFortune = calculateFortuneCycles(
+        { date: input.date, time: input.time, gender },
+        nextChart,
+      );
+      setChart(nextChart);
+      setFortune(nextFortune);
       setBirthInput({ date: input.date, time: input.time });
       setError("");
     } catch (caught) {
@@ -215,6 +249,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
     pendingRef.current = false;
     setPending(null);
     setChart(entry.chart);
+    setFortune(null);
     setBirthInput(null);
     setCurrentEntry(entry);
     setSelectedTopic(null);
@@ -235,6 +270,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
       if (currentEntry?.id === entry.id) {
         setCurrentEntry(null);
         setChart(null);
+        setFortune(null);
         setBirthInput(null);
         setSelectedTopic(null);
       }
@@ -260,7 +296,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
           </div>
         </div>
         <div className="input-card">
-          <p className="form-intro">양력 생년월일과 태어난 시간을 입력해 주세요. 현재는 출생시간을 아는 경우만 계산할 수 있습니다.</p>
+          <p className="form-intro">양력 생년월일과 태어난 시간을 입력해 주세요. 현재는 출생시간을 아는 경우만 계산할 수 있습니다. 성별은 전통 규칙에 따라 대운의 진행 방향을 정할 때만 사용합니다.</p>
           <form onSubmit={handleSubmit}>
             <div className="field-grid">
               <div className="field">
@@ -272,6 +308,15 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
                 <label htmlFor="time">출생시간</label>
                 <input id="time" name="time" type="time" required />
                 <small>시·분을 선택해 주세요</small>
+              </div>
+              <div className="field">
+                <label htmlFor="gender">성별</label>
+                <select id="gender" name="gender" defaultValue="" required>
+                  <option value="" disabled>선택해 주세요</option>
+                  <option value="male">남성</option>
+                  <option value="female">여성</option>
+                </select>
+                <small>성격을 판단하는 값으로 쓰지 않아요</small>
               </div>
             </div>
             <button className="primary-button" type="submit">
@@ -353,6 +398,49 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
               )}
               <p className="calculation-note">계산 기준: {chart.method}</p>
             </div>
+            {fortune && (
+              <section className="fortune-card" aria-labelledby="fortune-title">
+                <div className="fortune-heading">
+                  <div>
+                    <p className="step-kicker">시간에 따라 바뀌는 계산값</p>
+                    <h3 id="fortune-title">대운과 세운의 흐름</h3>
+                  </div>
+                  <span className="fortune-direction">{fortune.direction === "forward" ? "순행" : "역행"}</span>
+                </div>
+                <p><strong>대운</strong>은 약 10년씩 이어지는 큰 흐름이고, <strong>세운</strong>은 한 해씩 바뀌는 흐름입니다. 아래 내용은 계산된 글자와 일간의 기본 오행 관계이며, 실제 사건을 예언하는 말이 아닙니다.</p>
+                <div className="fortune-basis">
+                  <p><strong>진행 방향:</strong> {fortune.directionReason}</p>
+                  <p><strong>첫 대운 시작:</strong> 태어난 뒤 약 {offsetText(fortune.startOffset)}, {fortuneDateText(fortune.firstStartDate)}경(한국 표준시)</p>
+                  <p>{fortune.ageMethod}</p>
+                </div>
+                {fortune.currentPeriod ? (
+                  <>
+                    <div className="current-fortune">
+                      <span>{fortune.referenceYear}년이 속한 대운</span>
+                      <strong>{fortune.currentPeriod.ganZhi || "첫 대운 시작 전"} · {fortune.currentPeriod.startYear}–{fortune.currentPeriod.endYear}년</strong>
+                      <small>나이 {fortune.currentPeriod.startAge}–{fortune.currentPeriod.endAge}세 · 세는나이 기준</small>
+                      {fortune.currentPeriod.stemRelation && fortune.currentPeriod.branchRelation && (
+                        <p>윗글자는 {relationText(fortune.currentPeriod.stemRelation)}, 아랫글자는 {relationText(fortune.currentPeriod.branchRelation)}로 읽습니다.</p>
+                      )}
+                    </div>
+                    <div className="annual-fortunes" aria-label="현재 대운의 세운 목록">
+                      {fortune.annual.map((year) => (
+                        <article className={`annual-fortune${year.year === fortune.referenceYear ? " is-current" : ""}`} key={year.year}>
+                          <span>{year.year}년{year.year === fortune.referenceYear ? " · 현재" : ""}</span>
+                          <strong>{year.ganZhi}</strong>
+                          <small>{year.age}세 · 세는나이</small>
+                          <p>윗글자: {relationText(year.stemRelation)}</p>
+                          <p>아랫글자: {relationText(year.branchRelation)}</p>
+                        </article>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="fortune-unavailable">{fortune.referenceYear}년은 계산된 대운 범위에 포함되지 않습니다.</p>
+                )}
+                <p className="fortune-note">세운의 해 이름은 입춘을 기준으로 바뀝니다. 십성과 글자 사이의 합·충을 반영한 심화 해석은 이 화면에 포함하지 않았습니다.</p>
+              </section>
+            )}
           </section>
 
           <section className="step-section" aria-labelledby="reading-title">

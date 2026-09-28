@@ -5,10 +5,12 @@ declare module "lunar-javascript" {
     getMonth(): string;
     getDay(): string;
     getTime(): string;
+    getYun(gender: number, sect?: number): Yun;
   }
 
   class Lunar {
     getEightChar(): EightChar;
+    getYearInGanZhiExact(): string;
   }
 
   class Solar {
@@ -21,6 +23,35 @@ declare module "lunar-javascript" {
       second: number,
     ): Solar;
     getLunar(): Lunar;
+    getYear(): number;
+    nextHour(hours: number): Solar;
+    toYmdHms(): string;
+  }
+
+  class LiuNian {
+    getYear(): number;
+    getAge(): number;
+    getGanZhi(): string;
+  }
+
+  class DaYun {
+    getIndex(): number;
+    getStartYear(): number;
+    getEndYear(): number;
+    getStartAge(): number;
+    getEndAge(): number;
+    getGanZhi(): string;
+    getLiuNian(count?: number): LiuNian[];
+  }
+
+  class Yun {
+    getStartYear(): number;
+    getStartMonth(): number;
+    getStartDay(): number;
+    getStartHour(): number;
+    getStartSolar(): Solar;
+    isForward(): boolean;
+    getDaYun(count?: number): DaYun[];
   }
 
   const lunar: { Solar: typeof Solar };
