@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { calculate, InputError, type SajuChart, type SajuInput } from "../lib/saju/chart";
 import { describeElementDistribution, ELEMENT_ORDER, getChartCells, type Element } from "../lib/saju/chart-presentation";
+import { analyzeAdvancedReading } from "../lib/saju/advanced-reading";
 import { analyzeDayMaster } from "../lib/saju/strength";
 import {
   calculateFortuneCycles,
@@ -283,6 +284,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
   const baseReading: BaseReading | null = currentEntry?.base ?? null;
   const selectedReading = selectedTopic ? currentEntry?.topics[selectedTopic] : null;
   const assessment = chart ? analyzeDayMaster(chart) : null;
+  const advancedReading = chart ? analyzeAdvancedReading(chart) : null;
   const chartCells = chart ? getChartCells(chart) : [];
 
   return (
@@ -382,6 +384,42 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
                   <p>{describeElementDistribution(chart)}</p>
                 </div>
               </section>
+              {advancedReading && (
+                <section className="advanced-reading" aria-labelledby="advanced-reading-title">
+                  <h3 id="advanced-reading-title">글자 관계를 한 걸음 더 보기</h3>
+                  <p>십성은 나를 나타내는 <strong>일간</strong>과 다른 글자가 어떤 역할로 만나는지 붙인 열 가지 이름입니다. 여기서는 전문 이름보다 쉬운 뜻을 먼저 읽어 보세요.</p>
+                  <div className="day-master-basis">
+                    기준 글자 <strong>{advancedReading.dayMaster.character} · {advancedReading.dayMaster.element}</strong> — 태어난 날의 윗글자로, 나를 바라보는 기준입니다.
+                  </div>
+                  <ul className="ten-god-list" aria-label="일간과 주변 일곱 글자의 십성 관계">
+                    {advancedReading.tenGods.map((item) => (
+                      <li key={`${item.pillarLabel}-${item.position}`}>
+                        <span className="ten-god-position">{item.pillarLabel} {item.position} · {item.character}</span>
+                        <strong>{item.easyRole}</strong>
+                        <span className="ten-god-name">전문 이름: {item.name}{item.position === "아랫글자" ? ` · 중심 숨은 글자 ${item.basisStem} 기준` : ""}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="pair-reading">
+                    <h4>어울리거나 부딪히는 글자</h4>
+                    <p>합은 서로 연결되는 짝, 충은 서로 다른 방향으로 움직이는 짝이라는 뜻입니다. 좋고 나쁨이나 실제 사건을 정해 주지는 않습니다.</p>
+                    {advancedReading.pairRelations.length ? (
+                      <ul>
+                        {advancedReading.pairRelations.map((relation, index) => (
+                          <li key={`${relation.kind}-${relation.first.pillarLabel}-${relation.second.pillarLabel}-${index}`}>
+                            <strong>{relation.kind === "지지충" ? "부딪히는 짝" : "어울리는 짝"}</strong>
+                            {` · ${relation.first.pillarLabel} ${relation.first.character} + ${relation.second.pillarLabel} ${relation.second.character} — ${relation.easyMeaning}`}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : <p className="no-pair">이번 여덟 글자에서는 이 범위에 해당하는 짝을 찾지 못했습니다.</p>}
+                  </div>
+                  <div className="advanced-summary">
+                    <strong>함께 읽으면</strong>
+                    <p>{advancedReading.summary}</p>
+                  </div>
+                </section>
+              )}
               {assessment && (
                 <details className="assessment" aria-label="일간 뒷받침 계산 근거">
                   <summary>판단에 사용한 계산 근거 살펴보기</summary>
@@ -393,7 +431,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
                     <li>뿌리: 땅에 해당하는 네 글자 속의 숨은 재료(지장간)에 같은 오행이 {assessment.roots.length ? `${assessment.roots.map((root) => root.label).join("·")}에서 보입니다` : "보이지 않습니다"}.</li>
                     <li>다른 글자: 일간을 제외한 일곱 글자 중 돕는 쪽 {assessment.visible.support}개, 기운을 쓰는 쪽 {assessment.visible.drain}개, 제어하는 쪽 {assessment.visible.control}개입니다.</li>
                   </ul>
-                  <p className="assessment-note">숨은 재료의 세기나 글자 사이의 합·충은 아직 반영하지 않았습니다.</p>
+                  <p className="assessment-note">위의 합·충은 별도 단서로 보여주며, 성립 강도까지 판단하지 않아 이 1차 결론을 자동으로 바꾸지는 않습니다.</p>
                 </details>
               )}
               <p className="calculation-note">계산 기준: {chart.method}</p>
