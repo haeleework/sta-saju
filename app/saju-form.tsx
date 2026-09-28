@@ -19,6 +19,15 @@ import {
   withoutSavedReading,
   type SavedReading,
 } from "../lib/saju/reading-storage";
+import {
+  ACCOUNT_READING_PAGE_SIZE,
+  areSajuChartsEqual,
+  deleteAccountReading,
+  loadAccountReadings,
+  saveAccountReading,
+  type AccountSavedReading,
+} from "../lib/saju/account-reading-storage";
+import { createClient } from "../lib/supabase/client";
 
 const topics = [
   { id: "strength", name: "성격·강점", hint: "나를 이해하는 단서" },
@@ -33,6 +42,7 @@ const elementClass: Record<Element, string> = {
 
 type BirthInput = Pick<SajuInput, "date" | "time">;
 type Pending = "base" | "topic" | null;
+type AccountPending = "load" | "save" | `delete:${number}` | null;
 
 async function requestReading(input: ReadingRequest): Promise<{ chart: SajuChart; reading: unknown }> {
   let response: Response;
@@ -72,12 +82,19 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
   const [currentEntry, setCurrentEntry] = useState<SavedReading | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<ReadingTopic | null>(null);
   const [savedReadings, setSavedReadings] = useState<SavedReading[]>([]);
+  const [accountReadings, setAccountReadings] = useState<AccountSavedReading[]>([]);
+  const [accountNotice, setAccountNotice] = useState("");
+  const [accountPending, setAccountPending] = useState<AccountPending>("load");
+  const [accountHasMore, setAccountHasMore] = useState(false);
+  const [accountLoadFailed, setAccountLoadFailed] = useState(false);
   const [storageNotice, setStorageNotice] = useState("");
   const [error, setError] = useState("");
   const [baseError, setBaseError] = useState("");
   const [topicError, setTopicError] = useState("");
   const [pending, setPending] = useState<Pending>(null);
   const savedRef = useRef<SavedReading[]>([]);
+  const accountRef = useRef<AccountSavedReading[]>([]);
+  const accountRowsReadRef = useRef(0);
   const storageBlocked = useRef(false);
   const pendingRef = useRef(false);
   const requestSequence = useRef(0);
@@ -93,7 +110,138 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
       storageBlocked.current = true;
       setStorageNotice("이 브라우저에서는 결과 저장을 사용할 수 없습니다.");
     }
+
+    let active = true;
+    try {
+      const client = createClient();
+      void loadAccountReadings(client).then((page) => {
+        if (!active) return;
+        accountRef.current = page.entries;
+        accountRowsReadRef.current = page.rowsRead;
+        setAccountReadings(page.entries);
+        setAccountHasMore(page.hasMore);
+        setAccountLoadFailed(false);
+        setAccountNotice(page.invalidCount > 0
+          ? `읽을 수 없는 계정 결과 ${page.invalidCount}건은 목록에서 제외했습니다. 원본 자료는 변경하지 않았습니다.`
+          : "");
+      }).catch(() => {
+        if (!active) return;
+        setAccountLoadFailed(true);
+        setAccountNotice("계정 저장 결과를 불러오지 못했습니다. 다시 시도해 주세요.");
+      }).finally(() => {
+        if (active) setAccountPending(null);
+      });
+    } catch {
+      setAccountLoadFailed(true);
+      setAccountNotice("Supabase 연결 설정을 확인해 주세요.");
+      setAccountPending(null);
+    }
+    return () => { active = false; };
   }, []);
+
+  function updateAccountEntry(entry: AccountSavedReading) {
+    const alreadyLoaded = accountRef.current.some((item) => item.databaseId === entry.databaseId);
+    const next = [entry, ...accountRef.current.filter((item) => item.databaseId !== entry.databaseId)]
+      .sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt));
+    if (!alreadyLoaded) accountRowsReadRef.current += 1;
+    accountRef.current = next;
+    setAccountReadings(next);
+  }
+
+  async function handleSaveAccount(entry: SavedReading, automatic = false) {
+    if (accountPending) return;
+    setAccountPending("save");
+    setAccountNotice(automatic ? "새 주제 해석을 계정 저장 결과에 반영하는 중입니다…" : "계정에 저장하는 중입니다…");
+    try {
+      const saved = await saveAccountReading(createClient(), entry);
+      updateAccountEntry(saved);
+      setAccountNotice(automatic
+        ? "새 주제 해석을 계정 저장 결과에 반영했습니다."
+        : "현재 결과를 계정에 저장했습니다. 같은 결과를 다시 저장해도 한 건으로 유지됩니다.");
+    } catch (caught) {
+      setAccountNotice(caught instanceof Error ? caught.message : "계정에 저장되지 않았습니다. 다시 시도해 주세요.");
+    } finally {
+      setAccountPending(null);
+    }
+  }
+
+  async function handleLoadMoreAccountReadings() {
+    if (accountPending) return;
+    setAccountPending("load");
+    setAccountNotice("");
+    try {
+      const page = await loadAccountReadings(createClient(), accountRowsReadRef.current, ACCOUNT_READING_PAGE_SIZE);
+      const known = new Set(accountRef.current.map((entry) => entry.databaseId));
+      const next = [...accountRef.current, ...page.entries.filter((entry) => !known.has(entry.databaseId))];
+      accountRef.current = next;
+      accountRowsReadRef.current += page.rowsRead;
+      setAccountReadings(next);
+      setAccountHasMore(page.hasMore);
+      if (page.invalidCount > 0) {
+        setAccountNotice(`읽을 수 없는 계정 결과 ${page.invalidCount}건은 목록에서 제외했습니다. 원본 자료는 변경하지 않았습니다.`);
+      }
+    } catch (caught) {
+      setAccountNotice(caught instanceof Error ? caught.message : "계정 저장 결과를 불러오지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      setAccountPending(null);
+    }
+  }
+
+  async function handleReloadAccountReadings() {
+    if (accountPending) return;
+    setAccountPending("load");
+    setAccountNotice("");
+    try {
+      const page = await loadAccountReadings(createClient());
+      accountRef.current = page.entries;
+      accountRowsReadRef.current = page.rowsRead;
+      setAccountReadings(page.entries);
+      setAccountHasMore(page.hasMore);
+      setAccountLoadFailed(false);
+      setAccountNotice(page.invalidCount > 0
+        ? `읽을 수 없는 계정 결과 ${page.invalidCount}건은 목록에서 제외했습니다. 원본 자료는 변경하지 않았습니다.`
+        : "계정 저장 결과를 다시 불러왔습니다.");
+    } catch (caught) {
+      setAccountLoadFailed(true);
+      setAccountNotice(caught instanceof Error ? caught.message : "계정 저장 결과를 불러오지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      setAccountPending(null);
+    }
+  }
+
+  function handleOpenAccount(entry: AccountSavedReading) {
+    requestSequence.current += 1;
+    pendingRef.current = false;
+    setPending(null);
+    setChart(entry.chart);
+    setBirthInput(null);
+    setCurrentEntry({ id: entry.id, createdAt: entry.createdAt, chart: entry.chart, base: entry.base, topics: entry.topics });
+    setSelectedTopic(null);
+    setError("");
+    setBaseError("");
+    setTopicError("");
+    setAccountNotice("계정에 저장한 결과를 열었습니다. 새 주제 해석에는 출생 정보를 다시 입력해야 합니다.");
+  }
+
+  async function handleDeleteAccount(entry: AccountSavedReading) {
+    const label = `${new Date(entry.savedAt).toLocaleString("ko-KR")}에 계정에 저장한 ${entry.chart.pillars[2].korean}일주 결과`;
+    if (!window.confirm(`${label}를 계정에서 삭제할까요? 이 브라우저의 별도 저장 결과는 삭제되지 않습니다.`)) return;
+    if (accountPending) return;
+    setAccountPending(`delete:${entry.databaseId}`);
+    setAccountNotice("");
+    try {
+      await deleteAccountReading(createClient(), entry.databaseId);
+      const next = accountRef.current.filter((item) => item.databaseId !== entry.databaseId);
+      accountRef.current = next;
+      accountRowsReadRef.current = Math.max(0, accountRowsReadRef.current - 1);
+      setAccountReadings(next);
+      setAccountNotice("선택한 결과를 계정에서 삭제했습니다. 이 브라우저의 별도 결과는 변경하지 않았습니다.");
+    } catch (caught) {
+      setAccountNotice(caught instanceof Error ? caught.message : "계정 저장 결과를 삭제하지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      setAccountPending(null);
+    }
+  }
 
   function persistEntry(entry: SavedReading) {
     setCurrentEntry(entry);
@@ -125,19 +273,28 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
       topic: "general",
       question: "",
     };
-    setBirthInput(null);
-    setCurrentEntry(null);
-    setSelectedTopic(null);
     setBaseError("");
     setTopicError("");
-    setStorageNotice("");
 
     try {
-      setChart(calculate(input));
+      const calculated = calculate(input);
+      const reopenedEntryMatches = currentEntry !== null && areSajuChartsEqual(currentEntry.chart, calculated);
+      setChart(calculated);
       setBirthInput({ date: input.date, time: input.time });
+      setSelectedTopic(null);
+      if (reopenedEntryMatches && currentEntry) {
+        if (accountRef.current.some((entry) => entry.id === currentEntry.id)) {
+          setAccountNotice("다시 입력한 정보의 사주 구성이 계정 결과와 같습니다. 새 주제 해석을 이어서 만들 수 있습니다.");
+        } else {
+          setStorageNotice("다시 입력한 정보의 사주 구성이 브라우저 결과와 같습니다. 새 주제 해석을 이어서 만들 수 있습니다.");
+        }
+      } else {
+        setCurrentEntry(null);
+        setStorageNotice("");
+        setAccountNotice("");
+      }
       setError("");
     } catch (caught) {
-      setChart(null);
       setError(caught instanceof InputError ? caught.message : "계산하지 못했습니다. 입력을 확인해 주세요.");
     }
   }
@@ -199,7 +356,11 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
       if (sequence !== requestSequence.current) return;
       const reading = parseTopicReading(response.reading, topic);
       if (!reading) throw new Error("주제 해석 결과 형식이 올바르지 않습니다. 다시 시도해 주세요.");
-      persistEntry({ ...currentEntry, topics: { ...currentEntry.topics, [topic]: reading } });
+      const updated = { ...currentEntry, topics: { ...currentEntry.topics, [topic]: reading } };
+      persistEntry(updated);
+      if (accountRef.current.some((entry) => entry.id === updated.id)) {
+        await handleSaveAccount(updated, true);
+      }
     } catch (caught) {
       if (sequence === requestSequence.current) setTopicError(message(caught));
     } finally {
@@ -423,9 +584,53 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
         </>
       )}
 
-      <section className="step-section" aria-labelledby="saved-title">
+      <section className="step-section" aria-labelledby="account-saved-title">
         <div className="step-heading">
           <span className="step-number">05</span>
+          <div>
+            <p className="step-kicker">내 계정에 저장</p>
+            <h2 id="account-saved-title">다른 기기에서도 다시 보기</h2>
+          </div>
+        </div>
+        <p className="topic-intro">현재 보고 있는 결과만 직접 저장합니다. 이 브라우저의 과거 결과를 자동으로 옮기지 않으며, 다른 계정의 결과는 볼 수 없습니다.</p>
+        {currentEntry && (
+          <button className="account-save-button" type="button" disabled={accountPending !== null} onClick={() => handleSaveAccount(currentEntry)}>
+            {accountPending === "save" ? "계정에 저장하는 중…" : accountReadings.some((entry) => entry.id === currentEntry.id) ? "계정 저장 결과 업데이트" : "현재 결과를 계정에 저장"}
+          </button>
+        )}
+        {accountNotice && <p className="storage-notice" role="status">{accountNotice}</p>}
+        {accountPending === "load" && accountReadings.length === 0 ? (
+          <div className="empty-saved" role="status">계정 저장 결과를 불러오는 중입니다…</div>
+        ) : accountReadings.length === 0 ? (
+          <div className="empty-saved">
+            {accountLoadFailed ? "계정 저장 결과를 불러오지 못했습니다." : "아직 계정에 저장한 해석이 없습니다."}
+            {accountLoadFailed && <button className="inline-retry-button" type="button" onClick={handleReloadAccountReadings}>다시 불러오기</button>}
+          </div>
+        ) : (
+          <>
+            <ul className="saved-list">
+              {accountReadings.map((entry) => (
+                <li key={entry.databaseId}>
+                  <div>
+                    <strong>{entry.chart.pillars[2].korean}일주</strong>
+                    <span>{new Date(entry.savedAt).toLocaleString("ko-KR")} 계정 저장</span>
+                  </div>
+                  <div className="saved-actions">
+                    <button type="button" disabled={accountPending !== null} onClick={() => handleOpenAccount(entry)}>열기</button>
+                    <button type="button" disabled={accountPending !== null} onClick={() => handleDeleteAccount(entry)}>{accountPending === `delete:${entry.databaseId}` ? "삭제 중…" : "삭제"}</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {accountHasMore && <button className="load-more-button" type="button" disabled={accountPending !== null} onClick={handleLoadMoreAccountReadings}>계정 결과 더 보기</button>}
+            {accountLoadFailed && <button className="load-more-button" type="button" disabled={accountPending !== null} onClick={handleReloadAccountReadings}>처음부터 다시 불러오기</button>}
+          </>
+        )}
+      </section>
+
+      <section className="step-section" aria-labelledby="saved-title">
+        <div className="step-heading">
+          <span className="step-number">06</span>
           <div>
             <p className="step-kicker">이 브라우저에 저장</p>
             <h2 id="saved-title">지난 해석 다시 보기</h2>
