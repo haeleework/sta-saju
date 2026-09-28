@@ -50,6 +50,18 @@ test("직접 입력 화면에는 양력 날짜·시간·성별 필수 정보와 
   assert.match(source, /formOpen && !loading && \([\s\S]*<form[\s\S]*id="daily-date" type="date"[^>]*required/);
   assert.match(source, /id="daily-time" type="time"[^>]*required/);
   assert.match(source, /id="daily-gender"[\s\S]*여성[\s\S]*남성/);
+  assert.match(source, /<label htmlFor="daily-gender">성별<\/label>/);
+  assert.doesNotMatch(source, /대운 계산 기준 성별/);
   assert.match(source, /계정 DB에 보관하며, 언제든 수정·삭제할 수 있습니다/);
   assert.match(source, /내 사주로 저장하기/);
+});
+
+test("저장 결과 가져오기는 계정 저장 목록을 읽고 직접 입력 전환을 제공한다", () => {
+  const source = readFileSync(new URL("../app/daily-fortune-panel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /loadAccountReadings\(createClient\(\)\)/);
+  assert.match(source, /<select id="daily-saved"[\s\S]*required>/);
+  assert.match(source, /saved\.map\(/);
+  assert.match(source, /직접 입력으로 바꾸기/);
+  assert.match(source, /sourceReadingId: mode === "saved" \? Number\(selectedId\) : null/);
 });

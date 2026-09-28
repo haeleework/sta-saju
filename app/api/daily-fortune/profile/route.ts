@@ -4,6 +4,7 @@ import { isAfterDailyStart, kstDate } from "../../../../lib/saju/daily-fortune";
 import { generateDailyFortune, type DailyProfileRow } from "../../../../lib/saju/daily-fortune-server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { createClient } from "../../../../lib/supabase/server";
+import { after } from "next/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -83,8 +84,16 @@ export async function PUT(request: Request) {
   const firstRegistration = !existing && (saved as DailyProfileRow).profile_version === 1;
   const unchanged = existing?.profile_token === (saved as DailyProfileRow).profile_token &&
     existing?.profile_version === (saved as DailyProfileRow).profile_version;
-  const generation = firstRegistration && isAfterDailyStart(new Date())
-    ? await generateDailyFortune(saved as DailyProfileRow, kstDate(new Date()))
+  const shouldGenerate = firstRegistration && isAfterDailyStart(new Date());
+  if (shouldGenerate && process.env.GEMINI_API_KEY?.trim()) {
+    const fortuneDate = kstDate(new Date());
+    after(async () => {
+      try { await generateDailyFortune(saved as DailyProfileRow, fortuneDate); }
+      catch { console.error("Daily fortune generation failed after profile save."); }
+    });
+  }
+  const generation = shouldGenerate
+    ? process.env.GEMINI_API_KEY?.trim() ? "processing" : "missing_key"
     : firstRegistration ? "waiting_for_nine" : unchanged ? "unchanged" : "updated";
   return reply({ profile: saved, generation });
 }

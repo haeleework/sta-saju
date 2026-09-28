@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { loadAccountReadings, type AccountSavedReading } from "../lib/saju/account-reading-storage";
 import { createClient } from "../lib/supabase/client";
 import type { DailyFortuneReading } from "../lib/saju/daily-fortune";
+import { requestJson } from "../lib/saju/daily-fortune-http";
 
 type Profile = {
   birth_date: string;
@@ -13,15 +14,6 @@ type Profile = {
 };
 type FortuneState = { status: string; fortuneDate?: string; fortune?: DailyFortuneReading };
 type Mode = "direct" | "saved";
-
-async function requestJson(url: string, init?: RequestInit): Promise<Record<string, unknown>> {
-  const response = await fetch(url, { ...init, cache: "no-store" });
-  const data: unknown = await response.json();
-  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("응답을 확인하지 못했습니다.");
-  const body = data as Record<string, unknown>;
-  if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "요청을 처리하지 못했습니다.");
-  return body;
-}
 
 function statusText(status: string): string {
   if (status === "pending") return "오늘의 운세를 오전 9시부터 순서대로 준비합니다.";
@@ -76,7 +68,7 @@ export default function DailyFortunePanel() {
   }, [refreshFortune]);
 
   useEffect(() => {
-    if (fortune?.status !== "processing") return;
+    if (fortune?.status !== "processing" && fortune?.status !== "pending") return;
     const timer = window.setInterval(() => { void refreshFortune(); }, 5000);
     return () => window.clearInterval(timer);
   }, [fortune?.status, refreshFortune]);
@@ -93,12 +85,19 @@ export default function DailyFortunePanel() {
       setGender(profile.gender);
     }
     if (nextMode === "saved") {
+      setSelectedId("");
+      setSaved([]);
+      setSavedNotice("계정에 저장한 결과를 확인하는 중입니다…");
       try {
         const page = await loadAccountReadings(createClient());
         setSaved(page.entries);
         setSavedHasMore(page.hasMore);
         setSavedRowsRead(page.rowsRead);
-        setSavedNotice(page.entries.length ? "저장된 결과를 고른 뒤, 원래 입력한 출생 정보를 다시 확인해 주세요." : "계정에 저장한 사주 결과가 없습니다. 직접 입력해 주세요.");
+        setSavedNotice(page.entries.length
+          ? "결과를 고르면 사주 8글자를 가져옵니다. 과거 결과에는 출생 정보 원본이 없어, 대운 계산에 필요한 생년월일시와 성별은 다시 입력해야 합니다."
+          : page.invalidCount
+            ? "저장된 결과가 있지만 현재 형식으로 읽을 수 없습니다. 직접 입력해 주세요."
+            : "이 계정에 저장된 사주 결과가 없습니다. 사주 보기에서 결과를 계정에 저장했는지 확인하거나 직접 입력해 주세요.");
       } catch { setSavedNotice("저장된 결과를 불러오지 못했습니다. 직접 입력을 이용해 주세요."); }
     }
   }
@@ -137,7 +136,24 @@ export default function DailyFortunePanel() {
             ? "내 사주는 저장됐지만 오늘의 운세 생성 설정을 확인해야 합니다."
             : "내 사주를 저장했습니다.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "내 사주를 저장하지 못했습니다.");
+      const message = error instanceof Error ? error.message : "내 사주를 저장하지 못했습니다.";
+      try {
+        const check = await requestJson("/api/daily-fortune/profile");
+        const current = check.profile as Profile | null;
+        const selectedSource = mode === "saved" ? Number(selectedId) : null;
+        if (current && current.birth_date === date && current.birth_time.slice(0, 5) === time &&
+          current.gender === gender && current.source_reading_id === selectedSource) {
+          setProfile(current);
+          setEditing(false);
+          setFormOpen(false);
+          setShowDialog(false);
+          setShowResult(false);
+          await refreshFortune();
+          setNotice("내 사주는 저장됐습니다. 오늘의 운세 상태를 확인해 주세요.");
+          return;
+        }
+      } catch { /* The status check is best-effort; keep the original error. */ }
+      setNotice(message);
     } finally { setBusy(false); }
   }
 
@@ -193,16 +209,16 @@ export default function DailyFortunePanel() {
                 <option value="">결과 선택</option>
                 {saved.map((entry) => <option key={entry.databaseId} value={entry.databaseId}>{new Date(entry.createdAt).toLocaleDateString("ko-KR")} · {entry.chart.pillars.map((item) => item.text).join(" ")}</option>)}
               </select>
-              <small>{savedNotice}</small>
+              <small role="status">{savedNotice}</small>
               {savedHasMore && <button type="button" className="daily-text-button" onClick={() => void loadMoreSaved()}>저장 결과 더 보기</button>}
-              {!saved.length && <button type="button" className="daily-text-button" onClick={() => setMode("direct")}>직접 입력으로 바꾸기</button>}
+              <button type="button" className="daily-text-button" onClick={() => { setMode("direct"); setSelectedId(""); }}>직접 입력으로 바꾸기</button>
             </div>
           )}
-          <div className="field-grid">
-            <div className="field"><label htmlFor="daily-date">양력 생년월일</label><input id="daily-date" type="date" min="1990-01-01" required value={date} onChange={(event) => setDate(event.target.value)} /></div>
+          {(mode === "direct" || selectedId) && <div className="field-grid">
+            <div className="field"><label htmlFor="daily-date">양력 생년월일</label><input id="daily-date" type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></div>
             <div className="field"><label htmlFor="daily-time">출생시간</label><input id="daily-time" type="time" required value={time} onChange={(event) => setTime(event.target.value)} /></div>
-            <div className="field"><label htmlFor="daily-gender">대운 계산 기준 성별</label><select id="daily-gender" value={gender} onChange={(event) => setGender(event.target.value as "male" | "female")}><option value="female">여성</option><option value="male">남성</option></select></div>
-          </div>
+            <div className="field"><label htmlFor="daily-gender">성별</label><select id="daily-gender" value={gender} onChange={(event) => setGender(event.target.value as "male" | "female")}><option value="female">여성</option><option value="male">남성</option></select></div>
+          </div>}
           <p className="prototype-note">입력 정보는 매일 운세 계산을 위해 계정 DB에 보관하며, 언제든 수정·삭제할 수 있습니다.</p>
           <button className="primary-button" type="submit" disabled={busy || (mode === "saved" && !selectedId)}>내 사주로 저장하기 <span>→</span></button>
           <button className="daily-text-button" type="button" onClick={() => { setEditing(false); setFormOpen(false); setDate(""); setTime(""); }}>취소</button>
@@ -211,7 +227,7 @@ export default function DailyFortunePanel() {
 
       {profile && !formOpen && (
         <div className="result-card daily-card">
-          <div className="daily-card-head"><div><p className="step-kicker">등록된 내 사주</p><h2>{profile.birth_date} · {profile.birth_time.slice(0, 5)}</h2><p>대운 계산 기준: {profile.gender === "male" ? "남성" : "여성"}</p></div><div className="daily-actions"><button type="button" onClick={() => void openForm("direct", true)}>수정</button><button type="button" onClick={() => void removeProfile()} disabled={busy}>삭제</button></div></div>
+          <div className="daily-card-head"><div><p className="step-kicker">등록된 내 사주</p><h2>{profile.birth_date} · {profile.birth_time.slice(0, 5)}</h2><p>성별: {profile.gender === "male" ? "남성" : "여성"}</p></div><div className="daily-actions"><button type="button" onClick={() => void openForm("direct", true)}>수정</button><button type="button" onClick={() => void removeProfile()} disabled={busy}>삭제</button></div></div>
           {fortune?.status === "ready" && fortune.fortune ? (
             <>
               <button className="primary-button" type="button" onClick={() => setShowResult((value) => !value)}>{showResult ? "운세 닫기" : "오늘의 운세 확인하기"}<span>→</span></button>
