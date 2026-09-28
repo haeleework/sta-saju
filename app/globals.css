@@ -51,6 +51,33 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 }
 
 .page-header { max-width: 850px; padding: 92px 0 74px; }
+.service-home, .daily-page { padding: 80px 0 90px; }
+.service-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 52px; }
+.service-choices button { display: grid; gap: 12px; min-height: 260px; padding: 30px; border: 1px solid var(--border); border-radius: 24px; color: var(--text); background: var(--surface); text-align: left; cursor: pointer; }
+.service-choices button:hover, .service-choices button:focus-visible { border-color: var(--accent); background: #f5faf4; }
+.service-choices span { color: var(--accent); font-size: 13px; font-weight: 800; }
+.service-choices strong { font-size: clamp(25px, 3vw, 34px); }
+.service-choices small { color: var(--muted); font-size: 15px; }
+.service-choices b { justify-self: end; font-size: 27px; font-weight: 400; }
+.service-nav { display: flex; gap: 10px; padding-top: 24px; }
+.service-nav button, .daily-actions button, .daily-card > button, .daily-status button, .daily-text-button { min-height: 40px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 10px; color: var(--accent); background: var(--surface); font-weight: 700; cursor: pointer; }
+.daily-page > .intro { margin-bottom: 40px; }
+.daily-card, .daily-form { margin-top: 26px; }
+.daily-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; }
+.daily-card-head p { color: var(--muted); }
+.daily-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.daily-result { margin-top: 28px; padding: 26px; border-radius: 16px; background: #f5faf4; line-height: 1.8; }
+.daily-result h3 { margin: 6px 0 20px; font-size: 25px; }
+.daily-result p { margin: 18px 0; }
+.daily-result small { color: var(--muted); }
+.daily-status { margin-top: 26px; padding: 20px; border-radius: 14px; background: var(--accent-soft); }
+.daily-status p { margin: 0 0 14px; line-height: 1.6; }
+.daily-form .field-grid { margin-top: 24px; }
+.daily-text-button { margin-top: 14px; }
+.daily-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: rgb(25 32 25 / 55%); }
+.daily-dialog { width: min(100%, 580px); padding: 32px; border-radius: 22px; background: var(--surface); box-shadow: 0 18px 60px rgb(0 0 0 / 18%); }
+.daily-dialog p { color: var(--muted); line-height: 1.7; }
+.daily-dialog .daily-actions { margin-top: 26px; }
 .eyebrow, .step-kicker { color: var(--accent); font-size: 14px; font-weight: 800; letter-spacing: .08em; }
 h1 {
   margin: 20px 0 0;
@@ -229,6 +256,8 @@ h2 { margin: 0; font-size: clamp(26px, 3.4vw, 38px); line-height: 1.3; letter-sp
 .site-footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 96px; padding: 28px 0 42px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
 
 @media (max-width: 700px) {
+  .service-choices { grid-template-columns: 1fr; }
+  .daily-card-head { flex-direction: column; }
   .page-header { padding: 66px 0 56px; }
   .journey { gap: 55px; }
   .field-grid { grid-template-columns: 1fr; }
