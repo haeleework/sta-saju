@@ -241,6 +241,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
     pendingRef.current = false;
     setPending(null);
     setChart(entry.chart);
+    setFortune(null);
     setBirthInput(null);
     setCurrentEntry({ id: entry.id, createdAt: entry.createdAt, chart: entry.chart, base: entry.base, topics: entry.topics });
     setSelectedTopic(null);
@@ -638,7 +639,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
                 ) : (
                   <p className="fortune-unavailable">{fortune.referenceYear}년은 계산된 대운 범위에 포함되지 않습니다.</p>
                 )}
-                <p className="fortune-note">세운의 해 이름은 입춘을 기준으로 바뀝니다. 십성과 글자 사이의 합·충을 반영한 심화 해석은 이 화면에 포함하지 않았습니다.</p>
+                <p className="fortune-note">세운의 해 이름은 입춘을 기준으로 바뀝니다. 위의 십성과 합·충은 대운·세운의 길흉을 정하는 데 사용하지 않았습니다.</p>
               </section>
             )}
           </section>

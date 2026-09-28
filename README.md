@@ -19,6 +19,8 @@ npm run dev
 - `AGENTS.md`: Agent가 작업할 때 따르는 기본 원칙입니다.
 - `tests/`: 자동화된 검증을 관리합니다.
 
+이번 기능의 명세는 [계정별 결과 저장](docs/specs/004-account-reading-storage.md), [십성·합충 심화 해석](docs/specs/010-ten-gods-and-pair-relations.md), [성별·대운·세운](docs/specs/011-gender-fortune-cycles.md)에 있습니다. 세 기능을 함께 사용할 때의 흐름과 남은 검증은 [통합 Spec](docs/specs/012-integrated-reading-and-account-storage.md)에 정리했습니다.
+
 ## 폴더 구조
 
 ```text
