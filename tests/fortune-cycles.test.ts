@@ -7,7 +7,6 @@ import {
   type FortuneGender,
 } from "../lib/saju/fortune-cycles";
 import { buildReadingPrompt } from "../lib/saju/reading";
-import { READING_STORAGE_KEY, writeSavedReadings, type SavedReading } from "../lib/saju/reading-storage";
 
 const time = "08:37";
 
@@ -104,21 +103,9 @@ test("UI는 성별을 필수로 받고 대운·세운과 현재 기준 연도를
   assert.match(source, /실제 사건을 예언하는 말이 아닙니다/);
 });
 
-test("Gemini 프롬프트와 브라우저 저장에는 원본 생년월일시·성별을 새로 넣지 않는다", () => {
+test("Gemini 프롬프트에는 원본 생년월일시·성별을 넣지 않는다", () => {
   const date = "2005-12-23";
   const { chart } = cycles(date, "male");
   const prompt = buildReadingPrompt(chart, { date, time, kind: "base" });
   assert.doesNotMatch(prompt, /2005-12-23|08:37|male|female/);
-
-  const saved: SavedReading = {
-    id: "privacy-check",
-    createdAt: "2026-09-23T00:00:00.000Z",
-    chart,
-    base: { summary: "요약", highlights: ["단서 하나", "단서 둘"], caution: "참고용입니다." },
-    topics: {},
-  };
-  const values = new Map<string, string>();
-  assert.equal(writeSavedReadings({ setItem: (key, value) => values.set(key, value) }, [saved]), true);
-  const raw = values.get(READING_STORAGE_KEY) ?? "";
-  assert.doesNotMatch(raw, /2005-12-23|08:37|"gender"|"male"|"female"/);
 });

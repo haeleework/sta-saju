@@ -8,13 +8,6 @@ import {
   parseTopicReading,
   READING_MODEL,
 } from "../lib/saju/reading";
-import {
-  loadSavedReadings,
-  READING_STORAGE_KEY,
-  withoutSavedReading,
-  writeSavedReadings,
-  type SavedReading,
-} from "../lib/saju/reading-storage";
 import { handleReadingRequest } from "../app/api/reading/route";
 
 const date = "2005-12-23";
@@ -30,13 +23,6 @@ const topic = {
   title: "일과 진로",
   reading: "나에게 맞는 업무 환경을 생각해 보세요.",
   reflectionQuestion: "어떤 일을 할 때 몰입하나요?",
-};
-const saved: SavedReading = {
-  id: "reading-1",
-  createdAt: "2026-09-23T10:00:00.000Z",
-  chart,
-  base,
-  topics: { career: topic },
 };
 
 function request(body: unknown): Request {
@@ -214,31 +200,4 @@ test("API는 Gemini 제한·인증·연결 실패를 구분하고 재시도 성�
   await withGeminiMock(async () => geminiResponse(base), async () => {
     assert.equal((await authenticatedPost(request({ date, time, kind: "base" }))).status, 200);
   });
-});
-
-test("브라우저 저장 결과를 읽고 쓰며 한 항목만 삭제한다", () => {
-  const map = new Map<string, string>();
-  const storage = {
-    getItem: (key: string) => map.get(key) ?? null,
-    setItem: (key: string, value: string) => { map.set(key, value); },
-  };
-  assert.deepEqual(loadSavedReadings(storage), { entries: [], error: null });
-  assert.equal(writeSavedReadings(storage, [saved, { ...saved, id: "reading-2" }]), true);
-  assert.deepEqual(loadSavedReadings(storage).entries, [saved, { ...saved, id: "reading-2" }]);
-  assert.deepEqual(withoutSavedReading(loadSavedReadings(storage).entries, "reading-1").map((item) => item.id), ["reading-2"]);
-  assert.doesNotMatch(map.get(READING_STORAGE_KEY) ?? "", /2005-12-23|08:37|test-secret-key/);
-});
-
-test("손상된 저장값은 보존하고 저장 차단은 실패로 알린다", () => {
-  let raw = "{broken";
-  const storage = {
-    getItem: () => raw,
-    setItem: (_key: string, value: string) => { raw = value; },
-  };
-  assert.match(loadSavedReadings(storage).error ?? "", /읽을 수 없습니다/);
-  assert.equal(raw, "{broken");
-  raw = JSON.stringify([{ ...saved, topics: { career: { ...topic, topic: "money" } } }]);
-  assert.match(loadSavedReadings(storage).error ?? "", /읽을 수 없습니다/);
-  assert.equal(raw.includes("reading-1"), true);
-  assert.equal(writeSavedReadings({ setItem: () => { throw new Error("blocked"); } }, [saved]), false);
 });

@@ -20,15 +20,16 @@ type AuthViewProps = {
   authTestMode: boolean;
   onSignIn: () => void;
   onSignOut: () => void;
+  onHome?: () => void;
   children: ReactNode;
 };
 
-export function AuthView({ state, email, notice, busy, authTestMode, onSignIn, onSignOut, children }: AuthViewProps) {
+export function AuthView({ state, email, notice, busy, authTestMode, onSignIn, onSignOut, onHome, children }: AuthViewProps) {
   return (
     <>
       <nav className="topbar" aria-label="서비스 및 계정">
         <div className="topbar-brand">
-          <span className="brand">나의 결</span>
+          {state === "signed-in" && onHome ? <button className="brand brand-home" type="button" onClick={onHome} aria-label="나의 결 홈으로">나의 결</button> : <span className="brand">나의 결</span>}
           <span className="prototype-tag">AI 해석 베타</span>
         </div>
         {state === "signed-in" && (
@@ -58,7 +59,7 @@ export function AuthView({ state, email, notice, busy, authTestMode, onSignIn, o
   );
 }
 
-export default function LoginTestPanel({ authTestMode, children }: { authTestMode: boolean; children: ReactNode }) {
+export default function LoginTestPanel({ authTestMode, onHome, children }: { authTestMode: boolean; onHome: () => void; children: ReactNode }) {
   const [state, setState] = useState<LoginState>("loading");
   const [email, setEmail] = useState("");
   const [notice, setNotice] = useState("");
@@ -152,5 +153,5 @@ export default function LoginTestPanel({ authTestMode, children }: { authTestMod
     }
   }
 
-  return <AuthView state={state} email={email} notice={notice} busy={busy} authTestMode={authTestMode} onSignIn={signIn} onSignOut={signOut}>{children}</AuthView>;
+  return <AuthView state={state} email={email} notice={notice} busy={busy} authTestMode={authTestMode} onSignIn={signIn} onSignOut={signOut} onHome={onHome}>{children}</AuthView>;
 }

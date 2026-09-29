@@ -20,12 +20,7 @@ import {
   type ReadingRequest,
   type ReadingTopic,
 } from "../lib/saju/reading";
-import {
-  loadSavedReadings,
-  writeSavedReadings,
-  withoutSavedReading,
-  type SavedReading,
-} from "../lib/saju/reading-storage";
+import type { SavedReading } from "../lib/saju/saved-reading";
 import {
   ACCOUNT_READING_PAGE_SIZE,
   areSajuChartsEqual,
@@ -108,36 +103,22 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
   const [birthInput, setBirthInput] = useState<BirthInput | null>(null);
   const [currentEntry, setCurrentEntry] = useState<SavedReading | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<ReadingTopic | null>(null);
-  const [savedReadings, setSavedReadings] = useState<SavedReading[]>([]);
   const [accountReadings, setAccountReadings] = useState<AccountSavedReading[]>([]);
+  const [aliasDraft, setAliasDraft] = useState("");
   const [accountNotice, setAccountNotice] = useState("");
   const [accountPending, setAccountPending] = useState<AccountPending>("load");
   const [accountHasMore, setAccountHasMore] = useState(false);
   const [accountLoadFailed, setAccountLoadFailed] = useState(false);
-  const [storageNotice, setStorageNotice] = useState("");
   const [error, setError] = useState("");
   const [baseError, setBaseError] = useState("");
   const [topicError, setTopicError] = useState("");
   const [pending, setPending] = useState<Pending>(null);
-  const savedRef = useRef<SavedReading[]>([]);
   const accountRef = useRef<AccountSavedReading[]>([]);
   const accountRowsReadRef = useRef(0);
-  const storageBlocked = useRef(false);
   const pendingRef = useRef(false);
   const requestSequence = useRef(0);
 
   useEffect(() => {
-    try {
-      const loaded = loadSavedReadings(window.localStorage);
-      savedRef.current = loaded.entries;
-      storageBlocked.current = Boolean(loaded.error);
-      setSavedReadings(loaded.entries);
-      if (loaded.error) setStorageNotice(loaded.error);
-    } catch {
-      storageBlocked.current = true;
-      setStorageNotice("이 브라우저에서는 결과 저장을 사용할 수 없습니다.");
-    }
-
     let active = true;
     try {
       const client = createClient();
@@ -180,8 +161,12 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
     setAccountPending("save");
     setAccountNotice(automatic ? "새 주제 해석을 계정 저장 결과에 반영하는 중입니다…" : "계정에 저장하는 중입니다…");
     try {
-      const saved = await saveAccountReading(createClient(), entry);
+      const aliasToSave = automatic
+        ? accountRef.current.find((item) => item.id === entry.id)?.alias ?? null
+        : aliasDraft;
+      const saved = await saveAccountReading(createClient(), entry, aliasToSave);
       updateAccountEntry(saved);
+      if (!automatic) setAliasDraft(saved.alias ?? "");
       setAccountNotice(automatic
         ? "새 주제 해석을 계정 저장 결과에 반영했습니다."
         : "현재 결과를 계정에 저장했습니다. 같은 결과를 다시 저장해도 한 건으로 유지됩니다.");
@@ -244,6 +229,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
     setFortune(null);
     setBirthInput(null);
     setCurrentEntry({ id: entry.id, createdAt: entry.createdAt, chart: entry.chart, base: entry.base, topics: entry.topics });
+    setAliasDraft(entry.alias ?? "");
     setSelectedTopic(null);
     setError("");
     setBaseError("");
@@ -252,8 +238,8 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
   }
 
   async function handleDeleteAccount(entry: AccountSavedReading) {
-    const label = `${new Date(entry.savedAt).toLocaleString("ko-KR")}에 계정에 저장한 ${entry.chart.pillars[2].korean}일주 결과`;
-    if (!window.confirm(`${label}를 계정에서 삭제할까요? 이 브라우저의 별도 저장 결과는 삭제되지 않습니다.`)) return;
+    const label = entry.alias || `${new Date(entry.savedAt).toLocaleString("ko-KR")}에 계정에 저장한 ${entry.chart.pillars[2].korean}일주 결과`;
+    if (!window.confirm(`${label}를 계정에서 삭제할까요?`)) return;
     if (accountPending) return;
     setAccountPending(`delete:${entry.databaseId}`);
     setAccountNotice("");
@@ -263,7 +249,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
       accountRef.current = next;
       accountRowsReadRef.current = Math.max(0, accountRowsReadRef.current - 1);
       setAccountReadings(next);
-      setAccountNotice("선택한 결과를 계정에서 삭제했습니다. 이 브라우저의 별도 결과는 변경하지 않았습니다.");
+      setAccountNotice("선택한 결과를 계정에서 삭제했습니다.");
     } catch (caught) {
       setAccountNotice(caught instanceof Error ? caught.message : "계정 저장 결과를 삭제하지 못했습니다. 다시 시도해 주세요.");
     } finally {
@@ -271,21 +257,9 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
     }
   }
 
-  function persistEntry(entry: SavedReading) {
+  function showEntry(entry: SavedReading) {
     setCurrentEntry(entry);
-    if (storageBlocked.current) {
-      setStorageNotice("해석은 표시되지만 저장되지 않았습니다. 브라우저 저장 공간을 확인해 주세요.");
-      return;
-    }
-    try {
-      const next = [entry, ...savedRef.current.filter((item) => item.id !== entry.id)];
-      if (!writeSavedReadings(window.localStorage, next)) throw new Error("Write failed");
-      savedRef.current = next;
-      setSavedReadings(next);
-      setStorageNotice("이 브라우저에 결과를 저장했습니다.");
-    } catch {
-      setStorageNotice("해석은 표시되지만 저장되지 않았습니다. 브라우저 저장 공간을 확인해 주세요.");
-    }
+    setAliasDraft(accountRef.current.find((item) => item.id === entry.id)?.alias ?? "");
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -323,11 +297,11 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
         if (accountRef.current.some((entry) => entry.id === currentEntry.id)) {
           setAccountNotice("다시 입력한 정보의 사주 구성이 계정 결과와 같습니다. 새 주제 해석을 이어서 만들 수 있습니다.");
         } else {
-          setStorageNotice("다시 입력한 정보의 사주 구성이 브라우저 결과와 같습니다. 새 주제 해석을 이어서 만들 수 있습니다.");
+          setAccountNotice("현재 화면의 사주 구성과 같습니다. 새 주제 해석을 이어서 만들 수 있습니다.");
         }
       } else {
         setCurrentEntry(null);
-        setStorageNotice("");
+        setAliasDraft("");
         setAccountNotice("");
       }
       setError("");
@@ -356,7 +330,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
       };
       setChart(response.chart);
       setSelectedTopic(null);
-      persistEntry(entry);
+      showEntry(entry);
     } catch (caught) {
       if (sequence === requestSequence.current) setBaseError(message(caught));
     } finally {
@@ -394,7 +368,7 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
       const reading = parseTopicReading(response.reading, topic);
       if (!reading) throw new Error("주제 해석 결과 형식이 올바르지 않습니다. 다시 시도해 주세요.");
       const updated = { ...currentEntry, topics: { ...currentEntry.topics, [topic]: reading } };
-      persistEntry(updated);
+      showEntry(updated);
       if (accountRef.current.some((entry) => entry.id === updated.id)) {
         await handleSaveAccount(updated, true);
       }
@@ -405,42 +379,6 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
         pendingRef.current = false;
         setPending(null);
       }
-    }
-  }
-
-  function handleOpenSaved(entry: SavedReading) {
-    requestSequence.current += 1;
-    pendingRef.current = false;
-    setPending(null);
-    setChart(entry.chart);
-    setFortune(null);
-    setBirthInput(null);
-    setCurrentEntry(entry);
-    setSelectedTopic(null);
-    setError("");
-    setBaseError("");
-    setTopicError("");
-    setStorageNotice("저장한 결과를 열었습니다. 새 주제 해석에는 출생 정보를 다시 입력해야 합니다.");
-  }
-
-  function handleDeleteSaved(entry: SavedReading) {
-    const label = `${new Date(entry.createdAt).toLocaleString("ko-KR")}에 저장한 ${entry.chart.pillars[2].korean} 결과`;
-    if (!window.confirm(`${label}를 이 브라우저에서 삭제할까요?`)) return;
-    try {
-      const next = withoutSavedReading(savedRef.current, entry.id);
-      if (!writeSavedReadings(window.localStorage, next)) throw new Error("Write failed");
-      savedRef.current = next;
-      setSavedReadings(next);
-      if (currentEntry?.id === entry.id) {
-        setCurrentEntry(null);
-        setChart(null);
-        setFortune(null);
-        setBirthInput(null);
-        setSelectedTopic(null);
-      }
-      setStorageNotice("선택한 저장 결과를 삭제했습니다.");
-    } catch {
-      setStorageNotice("저장 결과를 삭제하지 못했습니다. 다시 시도해 주세요.");
     }
   }
 
@@ -720,11 +658,14 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
             <h2 id="account-saved-title">다른 기기에서도 다시 보기</h2>
           </div>
         </div>
-        <p className="topic-intro">현재 보고 있는 결과만 직접 저장합니다. 이 브라우저의 과거 결과를 자동으로 옮기지 않으며, 다른 계정의 결과는 볼 수 없습니다.</p>
+        <p className="topic-intro">현재 보고 있는 결과를 계정에 직접 저장해 주세요. 저장하지 않은 결과는 화면을 떠나면 다시 볼 수 없습니다.</p>
         {currentEntry && (
-          <button className="account-save-button" type="button" disabled={accountPending !== null} onClick={() => handleSaveAccount(currentEntry)}>
-            {accountPending === "save" ? "계정에 저장하는 중…" : accountReadings.some((entry) => entry.id === currentEntry.id) ? "계정 저장 결과 업데이트" : "현재 결과를 계정에 저장"}
-          </button>
+          <>
+            <div className="field"><label htmlFor="reading-alias">이 결과의 별칭 (선택)</label><input id="reading-alias" type="text" maxLength={30} value={aliasDraft} onChange={(event) => setAliasDraft(event.target.value)} placeholder="예: 내 사주, 친구 사주" /><small>실명 대신 알아보기 쉬운 이름을 써도 됩니다. 해석 생성에는 사용하지 않습니다.</small></div>
+            <button className="account-save-button" type="button" disabled={accountPending !== null} onClick={() => handleSaveAccount(currentEntry)}>
+              {accountPending === "save" ? "계정에 저장하는 중…" : accountReadings.some((entry) => entry.id === currentEntry.id) ? "계정 저장 결과 업데이트" : "현재 결과를 계정에 저장"}
+            </button>
+          </>
         )}
         {accountNotice && <p className="storage-notice" role="status">{accountNotice}</p>}
         {accountPending === "load" && accountReadings.length === 0 ? (
@@ -740,8 +681,8 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
               {accountReadings.map((entry) => (
                 <li key={entry.databaseId}>
                   <div>
-                    <strong>{entry.chart.pillars[2].korean}일주</strong>
-                    <span>{new Date(entry.savedAt).toLocaleString("ko-KR")} 계정 저장</span>
+                    <strong>{entry.alias || `${entry.chart.pillars[2].korean}일주`}</strong>
+                    <span>{entry.chart.pillars[2].korean}일주 · {new Date(entry.savedAt).toLocaleString("ko-KR")} 계정 저장</span>
                   </div>
                   <div className="saved-actions">
                     <button type="button" disabled={accountPending !== null} onClick={() => handleOpenAccount(entry)}>열기</button>
@@ -756,35 +697,6 @@ export default function SajuForm({ readingDisabled = false }: { readingDisabled?
         )}
       </section>
 
-      <section className="step-section" aria-labelledby="saved-title">
-        <div className="step-heading">
-          <span className="step-number">06</span>
-          <div>
-            <p className="step-kicker">이 브라우저에 저장</p>
-            <h2 id="saved-title">지난 해석 다시 보기</h2>
-          </div>
-        </div>
-        <p className="topic-intro">성공한 해석은 이 브라우저에만 저장됩니다. 다른 기기와 동기화되지 않으며, 브라우저 데이터를 지우면 사라질 수 있습니다.</p>
-        {storageNotice && <p className="storage-notice" role="status">{storageNotice}</p>}
-        {savedReadings.length === 0 ? (
-          <div className="empty-saved">아직 저장된 해석이 없습니다.</div>
-        ) : (
-          <ul className="saved-list">
-            {savedReadings.map((entry) => (
-              <li key={entry.id}>
-                <div>
-                  <strong>{entry.chart.pillars[2].korean}일주</strong>
-                  <span>{new Date(entry.createdAt).toLocaleString("ko-KR")} 저장</span>
-                </div>
-                <div className="saved-actions">
-                  <button type="button" onClick={() => handleOpenSaved(entry)}>열기</button>
-                  <button type="button" onClick={() => handleDeleteSaved(entry)}>삭제</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </div>
   );
 }

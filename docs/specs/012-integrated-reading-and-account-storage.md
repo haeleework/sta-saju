@@ -1,5 +1,7 @@
 # 012-integrated-reading-and-account-storage: 세 기능 통합 동작
 
+> 2026-09-29부터 브라우저 저장은 제거되었습니다. 이 문서의 관련 과거 문구보다 `016-account-only-reading-storage.md`의 계정 단일 저장 정책을 우선합니다.
+
 상태: 코드 통합 및 자동 검증 완료 · 실제 계정 간 접근 격리 검증 전
 
 작성일: 2026-09-28
