@@ -7,7 +7,7 @@ import { AuthView } from "../app/login-test-panel";
 import ServiceHome from "../app/service-home";
 import DailyFortunePanel from "../app/daily-fortune-panel";
 
-const home = createElement(ServiceHome, { readingDisabled: false });
+const home = createElement(ServiceHome, { readingDisabled: false, view: "home", onViewChange: () => {} });
 const authProps = {
   email: "reader@example.com",
   notice: "",
@@ -41,7 +41,8 @@ test("오늘의 운세 화면은 프로필 조회 중 안내를 렌더하고 등
   assert.doesNotMatch(html, /role="dialog"|id="daily-date"|오늘의 운세 확인하기/);
   assert.match(source, /if \(!item\) setShowDialog\(true\)/);
   assert.match(source, /showDialog && !loading && \([\s\S]*role="dialog" aria-modal="true"[\s\S]*내 사주 정보를 먼저 입력해주세요!/);
-  assert.match(source, /직접 입력[\s\S]*저장된 사주 결과에서 가져오기[\s\S]*닫기/);
+  assert.match(source, /내 사주 정보를 먼저 입력해주세요![\s\S]*양력 생년월일·출생시간·성별/);
+  assert.doesNotMatch(source, /저장된 사주 결과에서 가져오기/);
 });
 
 test("직접 입력 화면에는 양력 날짜·시간·성별 필수 정보와 계정 저장 안내가 있다", () => {
@@ -56,14 +57,19 @@ test("직접 입력 화면에는 양력 날짜·시간·성별 필수 정보와 
   assert.match(source, /내 사주로 저장하기/);
 });
 
-test("저장 결과 가져오기는 계정 저장 목록을 읽고 직접 입력 전환을 제공한다", () => {
+test("매일 운세 등록은 계정 저장 결과를 불러오지 않고 출생 정보를 직접 받는다", () => {
   const source = readFileSync(new URL("../app/daily-fortune-panel.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /loadAccountReadings\(createClient\(\)\)/);
-  assert.match(source, /<select id="daily-saved"[\s\S]*required>/);
-  assert.match(source, /saved\.map\(/);
-  assert.match(source, /직접 입력으로 바꾸기/);
-  assert.match(source, /sourceReadingId: mode === "saved" \? Number\(selectedId\) : null/);
+  assert.doesNotMatch(source, /loadAccountReadings|id="daily-saved"|saved\.map\(|직접 입력으로 바꾸기/);
+  assert.match(source, /sourceReadingId: null/);
+  assert.match(source, /<form[\s\S]*id="daily-date"[\s\S]*id="daily-time"[\s\S]*id="daily-gender"[\s\S]*내 사주로 저장하기/);
+});
+
+test("사주 보기의 계정 저장 결과 목록은 별도로 유지된다", () => {
+  const source = readFileSync(new URL("../app/saju-form.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /loadAccountReadings/);
+  assert.match(source, /저장한 결과/);
 });
 
 test("생성 중 상태는 요청한 대기 문구를 보여주고 자동으로 상태를 다시 확인한다", () => {

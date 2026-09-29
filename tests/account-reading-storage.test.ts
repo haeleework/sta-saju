@@ -7,11 +7,12 @@ import {
   areSajuChartsEqual,
   deleteAccountReading,
   loadAccountReadings,
+  normalizeReadingAlias,
   parseAccountReadingRow,
   saveAccountReading,
 } from "../lib/saju/account-reading-storage";
 import { calculate } from "../lib/saju/chart";
-import type { SavedReading } from "../lib/saju/reading-storage";
+import type { SavedReading } from "../lib/saju/saved-reading";
 
 const sourceId = "123e4567-e89b-42d3-a456-426614174000";
 const chart = calculate({
@@ -170,10 +171,29 @@ test("계정 저장 행은 검증한 뒤 앱의 SavedReading 형식으로 바꾼
     createdAt: saved.createdAt,
     savedAt: validRow.saved_at,
     updatedAt: validRow.updated_at,
+    alias: null,
     chart,
     base,
     topics: { career },
   });
+});
+
+test("계정 저장 행의 별칭을 읽고, 기존 별칭 없는 행은 그대로 연다", () => {
+  assert.equal(parseAccountReadingRow(validRow)?.alias, null);
+  assert.equal(parseAccountReadingRow({ ...validRow, alias: null })?.alias, null);
+  assert.equal(parseAccountReadingRow({ ...validRow, alias: "내 사주" })?.alias, "내 사주");
+});
+
+test("별칭은 공백을 정리하고 비울 수 있지만 긴 값과 제어 문자는 거부한다", () => {
+  assert.equal(normalizeReadingAlias("  내 사주  "), "내 사주");
+  assert.equal(normalizeReadingAlias("   "), null);
+  assert.equal(normalizeReadingAlias("😀".repeat(30)), "😀".repeat(30));
+  for (const alias of ["가".repeat(31), "😀".repeat(31), "첫째\n둘째", "첫째\t둘째"]) {
+    assert.throws(() => normalizeReadingAlias(alias), AccountReadingStorageError);
+  }
+  for (const alias of [" 별칭", "별칭 ", "", "첫째\n둘째", "가".repeat(31)]) {
+    assert.equal(parseAccountReadingRow({ ...validRow, alias }), null);
+  }
 });
 
 test("잘못된 계정 저장 행과 주제 자료는 거부한다", () => {
@@ -253,6 +273,34 @@ test("같은 source_id 저장은 사용자별 유일 키 upsert로 멱등 처리
   }
 });
 
+test("별칭 저장·수정·비우기를 계정 행 한 건의 upsert에 전달한다", async () => {
+  const { client, calls } = mockClient(
+    { data: { ...validRow, alias: "내 사주" }, error: null },
+    { data: { ...validRow, alias: "가족 사주" }, error: null },
+    { data: { ...validRow, alias: null }, error: null },
+  );
+
+  assert.equal((await saveAccountReading(client, saved, "  내 사주  ")).alias, "내 사주");
+  assert.equal((await saveAccountReading(client, saved, "가족 사주")).alias, "가족 사주");
+  assert.equal((await saveAccountReading(client, saved, "")).alias, null);
+
+  assert.deepEqual(calls.map((call) =>
+    (call.operations.find((operation) => operation.name === "upsert")?.args[0] as Record<string, unknown>).alias,
+  ), ["내 사주", "가족 사주", null]);
+});
+
+test("잘못된 별칭은 데이터베이스에 요청하기 전에 거부한다", async () => {
+  const { client, calls } = mockClient();
+  await assert.rejects(saveAccountReading(client, saved, "첫째\n둘째"), AccountReadingStorageError);
+  assert.equal(calls.length, 0);
+});
+
+test("자동 주제 갱신은 이미 저장한 별칭을 다시 전달한다", () => {
+  const source = readFileSync(new URL("../app/saju-form.tsx", import.meta.url), "utf8");
+  assert.match(source, /automatic\s*\?\s*accountRef\.current\.find\(\(item\)\s*=>\s*item\.id\s*===\s*entry\.id\)\?\.alias/);
+  assert.match(source, /saveAccountReading\(createClient\(\),\s*entry,\s*aliasToSave\)/);
+});
+
 test("저장 응답이 불확실하면 source_id로 다시 읽어 성공 여부를 확인한다", async () => {
   const { client, calls } = mockClient(
     { data: null, error: { message: "response lost" } },
@@ -265,6 +313,32 @@ test("저장 응답이 불확실하면 source_id로 다시 읽어 성공 여부�
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1].operations.find((operation) => operation.name === "eq")?.args,
     ["source_id", sourceId]);
+});
+
+test("별칭 변경 요청이 실패하고 옛 행만 재조회되면 성공으로 표시하지 않는다", async () => {
+  const { client, calls } = mockClient(
+    { data: null, error: { message: "request failed" } },
+    { data: { ...validRow, alias: "옛 별칭" }, error: null },
+  );
+
+  await assert.rejects(
+    saveAccountReading(client, saved, "새 별칭"),
+    (error: unknown) => error instanceof AccountReadingStorageError && /저장되지 않았습니다/.test(error.message),
+  );
+  assert.equal(calls.length, 2);
+  assert.equal((calls[0].operations.find((operation) => operation.name === "upsert")?.args[0] as Record<string, unknown>).alias, "새 별칭");
+});
+
+test("주제 해석 갱신 요청이 실패하고 이전 내용만 재조회되면 성공으로 표시하지 않는다", async () => {
+  const { client } = mockClient(
+    { data: null, error: { message: "request failed" } },
+    { data: { ...validRow, alias: "내 사주", topic_readings: {} }, error: null },
+  );
+
+  await assert.rejects(
+    saveAccountReading(client, saved, "내 사주"),
+    (error: unknown) => error instanceof AccountReadingStorageError && /저장되지 않았습니다/.test(error.message),
+  );
 });
 
 test("저장 실패·잘못된 식별자·손상 성공 응답은 성공으로 표시하지 않는다", async () => {
@@ -329,4 +403,17 @@ test("마이그레이션은 사용자 소유권 RLS, anon 차단, 중복 방지 
   assert.match(sql, /for insert[\s\S]+?with check\s*\(\s*\(select auth\.uid\(\)\)\s*=\s*user_id\s*\)/i);
   assert.match(sql, /for update[\s\S]+?using\s*\(\s*\(select auth\.uid\(\)\)\s*=\s*user_id\s*\)[\s\S]+?with check\s*\(\s*\(select auth\.uid\(\)\)\s*=\s*user_id\s*\)/i);
   assert.match(sql, /for delete[\s\S]+?using\s*\(\s*\(select auth\.uid\(\)\)\s*=\s*user_id\s*\)/i);
+});
+
+test("별칭 마이그레이션은 기존 행을 보존하며 길이와 제어 문자 제약을 건다", () => {
+  const sql = readFileSync(
+    new URL("../supabase/migrations/20260929051636_reading_alias.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(sql, /alter table public\.saju_readings\s+add column if not exists alias text/i);
+  assert.match(sql, /alias is null/i);
+  assert.match(sql, /char_length\(alias\) between 1 and 30/i);
+  assert.match(sql, /alias = btrim\(alias\)/i);
+  assert.match(sql, /alias !~ '\[\[:cntrl:\]\]'/i);
+  assert.doesNotMatch(sql, /update public\.saju_readings/i);
 });

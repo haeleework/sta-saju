@@ -1,8 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { loadAccountReadings, type AccountSavedReading } from "../lib/saju/account-reading-storage";
-import { createClient } from "../lib/supabase/client";
 import type { DailyFortuneReading } from "../lib/saju/daily-fortune";
 import { requestJson } from "../lib/saju/daily-fortune-http";
 
@@ -13,7 +11,6 @@ type Profile = {
   source_reading_id: number | null;
 };
 type FortuneState = { status: string; fortuneDate?: string; fortune?: DailyFortuneReading };
-type Mode = "direct" | "saved";
 
 function statusText(status: string): string {
   if (status === "pending") return "오늘의 운세를 오전 9시부터 순서대로 준비합니다.";
@@ -32,16 +29,10 @@ export default function DailyFortunePanel() {
   const [notice, setNotice] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [mode, setMode] = useState<Mode>("direct");
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [gender, setGender] = useState<"male" | "female">("female");
-  const [selectedId, setSelectedId] = useState("");
-  const [saved, setSaved] = useState<AccountSavedReading[]>([]);
-  const [savedHasMore, setSavedHasMore] = useState(false);
-  const [savedRowsRead, setSavedRowsRead] = useState(0);
-  const [savedNotice, setSavedNotice] = useState("");
   const [showResult, setShowResult] = useState(false);
 
   const refreshFortune = useCallback(async () => {
@@ -73,8 +64,7 @@ export default function DailyFortunePanel() {
     return () => window.clearInterval(timer);
   }, [fortune?.status, refreshFortune]);
 
-  async function openForm(nextMode: Mode, isEdit = false) {
-    setMode(nextMode);
+  function openForm(isEdit = false) {
     setEditing(isEdit);
     setFormOpen(true);
     setNotice("");
@@ -84,31 +74,6 @@ export default function DailyFortunePanel() {
       setTime(profile.birth_time.slice(0, 5));
       setGender(profile.gender);
     }
-    if (nextMode === "saved") {
-      setSelectedId("");
-      setSaved([]);
-      setSavedNotice("계정에 저장한 결과를 확인하는 중입니다…");
-      try {
-        const page = await loadAccountReadings(createClient());
-        setSaved(page.entries);
-        setSavedHasMore(page.hasMore);
-        setSavedRowsRead(page.rowsRead);
-        setSavedNotice(page.entries.length
-          ? "결과를 고르면 사주 8글자를 가져옵니다. 과거 결과에는 출생 정보 원본이 없어, 대운 계산에 필요한 생년월일시와 성별은 다시 입력해야 합니다."
-          : page.invalidCount
-            ? "저장된 결과가 있지만 현재 형식으로 읽을 수 없습니다. 직접 입력해 주세요."
-            : "이 계정에 저장된 사주 결과가 없습니다. 사주 보기에서 결과를 계정에 저장했는지 확인하거나 직접 입력해 주세요.");
-      } catch { setSavedNotice("저장된 결과를 불러오지 못했습니다. 직접 입력을 이용해 주세요."); }
-    }
-  }
-
-  async function loadMoreSaved() {
-    try {
-      const page = await loadAccountReadings(createClient(), savedRowsRead);
-      setSaved((current) => [...current, ...page.entries]);
-      setSavedHasMore(page.hasMore);
-      setSavedRowsRead((current) => current + page.rowsRead);
-    } catch { setSavedNotice("추가 저장 결과를 불러오지 못했습니다. 다시 시도해 주세요."); }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -120,7 +85,7 @@ export default function DailyFortunePanel() {
       const result = await requestJson("/api/daily-fortune/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, time, gender, sourceReadingId: mode === "saved" ? Number(selectedId) : null }),
+        body: JSON.stringify({ date, time, gender, sourceReadingId: null }),
       });
       setProfile(result.profile as Profile);
       setEditing(false);
@@ -140,9 +105,8 @@ export default function DailyFortunePanel() {
       try {
         const check = await requestJson("/api/daily-fortune/profile");
         const current = check.profile as Profile | null;
-        const selectedSource = mode === "saved" ? Number(selectedId) : null;
         if (current && current.birth_date === date && current.birth_time.slice(0, 5) === time &&
-          current.gender === gender && current.source_reading_id === selectedSource) {
+          current.gender === gender && current.source_reading_id === null) {
           setProfile(current);
           setEditing(false);
           setFormOpen(false);
@@ -187,8 +151,7 @@ export default function DailyFortunePanel() {
             <h2 id="daily-dialog-title">내 사주 정보를 먼저 입력해주세요!</h2>
             <p>매일 운세를 만들 기준 정보가 필요합니다. 양력 생년월일·출생시간·성별은 내 계정에 저장됩니다.</p>
             <div className="daily-actions">
-              <button type="button" onClick={() => void openForm("direct")}>직접 입력</button>
-              <button type="button" onClick={() => void openForm("saved")}>저장된 사주 결과에서 가져오기</button>
+              <button type="button" onClick={() => openForm()}>내 사주 정보 입력하기</button>
               <button type="button" onClick={() => setShowDialog(false)}>닫기</button>
             </div>
           </div>
@@ -202,32 +165,20 @@ export default function DailyFortunePanel() {
       {formOpen && !loading && (
         <form className="input-card daily-form" onSubmit={(event) => void submit(event)}>
           <h2>{editing ? "내 사주 정보 수정" : "내 사주 정보 등록"}</h2>
-          {mode === "saved" && (
-            <div className="field">
-              <label htmlFor="daily-saved">계정에 저장한 사주 결과</label>
-              <select id="daily-saved" value={selectedId} onChange={(event) => setSelectedId(event.target.value)} required>
-                <option value="">결과 선택</option>
-                {saved.map((entry) => <option key={entry.databaseId} value={entry.databaseId}>{new Date(entry.createdAt).toLocaleDateString("ko-KR")} · {entry.chart.pillars.map((item) => item.text).join(" ")}</option>)}
-              </select>
-              <small role="status">{savedNotice}</small>
-              {savedHasMore && <button type="button" className="daily-text-button" onClick={() => void loadMoreSaved()}>저장 결과 더 보기</button>}
-              <button type="button" className="daily-text-button" onClick={() => { setMode("direct"); setSelectedId(""); }}>직접 입력으로 바꾸기</button>
-            </div>
-          )}
-          {(mode === "direct" || selectedId) && <div className="field-grid">
+          <div className="field-grid">
             <div className="field"><label htmlFor="daily-date">양력 생년월일</label><input id="daily-date" type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></div>
             <div className="field"><label htmlFor="daily-time">출생시간</label><input id="daily-time" type="time" required value={time} onChange={(event) => setTime(event.target.value)} /></div>
             <div className="field"><label htmlFor="daily-gender">성별</label><select id="daily-gender" value={gender} onChange={(event) => setGender(event.target.value as "male" | "female")}><option value="female">여성</option><option value="male">남성</option></select></div>
-          </div>}
+          </div>
           <p className="prototype-note">입력 정보는 매일 운세 계산을 위해 계정 DB에 보관하며, 언제든 수정·삭제할 수 있습니다.</p>
-          <button className="primary-button" type="submit" disabled={busy || (mode === "saved" && !selectedId)}>내 사주로 저장하기 <span>→</span></button>
+          <button className="primary-button" type="submit" disabled={busy}>내 사주로 저장하기 <span>→</span></button>
           <button className="daily-text-button" type="button" onClick={() => { setEditing(false); setFormOpen(false); setDate(""); setTime(""); }}>취소</button>
         </form>
       )}
 
       {profile && !formOpen && (
         <div className="result-card daily-card">
-          <div className="daily-card-head"><div><p className="step-kicker">등록된 내 사주</p><h2>{profile.birth_date} · {profile.birth_time.slice(0, 5)}</h2><p>성별: {profile.gender === "male" ? "남성" : "여성"}</p></div><div className="daily-actions"><button type="button" onClick={() => void openForm("direct", true)}>수정</button><button type="button" onClick={() => void removeProfile()} disabled={busy}>삭제</button></div></div>
+          <div className="daily-card-head"><div><p className="step-kicker">등록된 내 사주</p><h2>{profile.birth_date} · {profile.birth_time.slice(0, 5)}</h2><p>성별: {profile.gender === "male" ? "남성" : "여성"}</p></div><div className="daily-actions"><button type="button" onClick={() => openForm(true)}>수정</button><button type="button" onClick={() => void removeProfile()} disabled={busy}>삭제</button></div></div>
           {fortune?.status === "ready" && fortune.fortune ? (
             <>
               <button className="primary-button" type="button" onClick={() => setShowResult((value) => !value)}>{showResult ? "운세 닫기" : "오늘의 운세 확인하기"}<span>→</span></button>

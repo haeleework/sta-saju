@@ -6,7 +6,7 @@ import {
   parseTopicReading,
   type ReadingTopic,
 } from "./reading";
-import type { SavedReading } from "./reading-storage";
+import type { SavedReading } from "./saved-reading";
 
 export const ACCOUNT_READING_PAGE_SIZE = 20;
 
@@ -20,12 +20,14 @@ const ACCOUNT_READING_COLUMNS = [
   "chart",
   "base_reading",
   "topic_readings",
+  "alias",
 ].join(",");
 
 export type AccountSavedReading = SavedReading & {
   databaseId: number;
   savedAt: string;
   updatedAt: string;
+  alias: string | null;
 };
 
 export type AccountReadingPage = {
@@ -40,6 +42,15 @@ export class AccountReadingStorageError extends Error {
     super(message);
     this.name = "AccountReadingStorageError";
   }
+}
+
+export function normalizeReadingAlias(value: string): string | null {
+  const alias = value.trim();
+  if (!alias) return null;
+  if (Array.from(alias).length > 30 || /[\u0000-\u001f\u007f]/u.test(alias)) {
+    throw new AccountReadingStorageError("별칭은 줄바꿈 없이 30글자 이내로 입력해 주세요.");
+  }
+  return alias;
 }
 
 function validDate(value: unknown): value is string {
@@ -73,6 +84,9 @@ export function parseAccountReadingRow(value: unknown): AccountSavedReading | nu
     typeof row.source_id !== "string" || !isUuid(row.source_id) ||
     row.schema_version !== 1 ||
     !validDate(row.interpreted_at) || !validDate(row.saved_at) || !validDate(row.updated_at) ||
+    (row.alias !== undefined && row.alias !== null &&
+      (typeof row.alias !== "string" || row.alias !== row.alias.trim() ||
+        row.alias.length === 0 || Array.from(row.alias).length > 30 || /[\u0000-\u001f\u007f]/u.test(row.alias))) ||
     !isSajuChart(row.chart)
   ) return null;
 
@@ -92,13 +106,14 @@ export function parseAccountReadingRow(value: unknown): AccountSavedReading | nu
     createdAt: row.interpreted_at,
     savedAt: row.saved_at,
     updatedAt: row.updated_at,
+    alias: typeof row.alias === "string" ? row.alias : null,
     chart: row.chart,
     base,
     topics,
   };
 }
 
-function toPayload(entry: SavedReading) {
+function toPayload(entry: SavedReading, alias?: string | null) {
   if (!isUuid(entry.id)) {
     throw new AccountReadingStorageError("이 결과의 식별자를 확인할 수 없어 계정에 저장하지 못했습니다.");
   }
@@ -109,6 +124,7 @@ function toPayload(entry: SavedReading) {
     chart: entry.chart,
     base_reading: entry.base,
     topic_readings: entry.topics,
+    ...(alias === undefined ? {} : { alias: alias === null ? null : normalizeReadingAlias(alias) }),
   };
 }
 
@@ -150,8 +166,8 @@ async function findAccountReading(client: SupabaseClient, sourceId: string): Pro
   return parseAccountReadingRow(data);
 }
 
-export async function saveAccountReading(client: SupabaseClient, entry: SavedReading): Promise<AccountSavedReading> {
-  const payload = toPayload(entry);
+export async function saveAccountReading(client: SupabaseClient, entry: SavedReading, alias?: string | null): Promise<AccountSavedReading> {
+  const payload = toPayload(entry, alias);
   const { data, error } = await client
     .from("saju_readings")
     .upsert(payload, { onConflict: "user_id,source_id", defaultToNull: false })
@@ -162,7 +178,9 @@ export async function saveAccountReading(client: SupabaseClient, entry: SavedRea
   // The response can be lost after Postgres committed the row. Re-read by the
   // per-user source id before reporting failure or allowing a retry.
   const existing = await findAccountReading(client, entry.id);
-  if (existing) return existing;
+  const expectedAlias = alias === undefined ? undefined : alias === null ? null : normalizeReadingAlias(alias);
+  if (existing && (expectedAlias === undefined || existing.alias === expectedAlias) &&
+    JSON.stringify(canonicalJson(existing.topics)) === JSON.stringify(canonicalJson(entry.topics))) return existing;
   throw new AccountReadingStorageError("계정에 저장되지 않았습니다. 연결 상태를 확인하고 다시 시도해 주세요.");
 }
 

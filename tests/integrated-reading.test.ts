@@ -10,11 +10,7 @@ import {
   loadAccountReadings,
   saveAccountReading,
 } from "../lib/saju/account-reading-storage";
-import {
-  loadSavedReadings,
-  writeSavedReadings,
-  type SavedReading,
-} from "../lib/saju/reading-storage";
+import type { SavedReading } from "../lib/saju/saved-reading";
 
 const date = "2005-12-23";
 const time = "08:37";
@@ -108,19 +104,20 @@ test("다른 사주 구성은 저장된 해석과 연결하지 않는다", () =>
   assert.equal(areSajuChartsEqual(saved.chart, different), false);
 });
 
-test("브라우저와 계정 저장은 별도이며 계정 저장은 명시적인 한 번의 동작으로만 일어난다", async () => {
-  const values = new Map<string, string>();
-  const browser = {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => { values.set(key, value); },
-  };
+test("해석 결과는 계정에 명시적으로 저장할 때만 남는다", async () => {
   const account = memoryAccountClient();
-  assert.equal(writeSavedReadings(browser, [saved]), true);
   assert.equal(account.writes(), 0);
   await saveAccountReading(account.client, saved);
   assert.equal(account.writes(), 1);
-  assert.deepEqual(loadSavedReadings(browser).entries, [saved]);
   assert.equal((await loadAccountReadings(account.client)).entries.length, 1);
+});
+
+test("사주 화면에는 브라우저 저장 접근과 지난 해석 목록이 없다", () => {
+  const source = readFileSync(new URL("../app/saju-form.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /localStorage|loadSavedReadings|writeSavedReadings|handleOpenSaved|handleDeleteSaved/);
+  assert.doesNotMatch(source, /이 브라우저에 저장|지난 해석 다시 보기|savedReadings\.map/);
+  assert.match(source, /현재 결과를 계정에 저장/);
+  assert.match(source, /handleSaveAccount\(currentEntry\)/);
 });
 
 test("화면은 계정 결과를 열 때 지난 운을 지우고 출생 입력을 요구한다", () => {
@@ -142,7 +139,7 @@ test("화면은 같은 사주에서 해석을 유지하고 다른 사주에서 �
 });
 
 test("계산·재열람 경로는 Gemini를 요청하지 않고 AI 해석 버튼만 기존 요청을 사용한다", () => {
-  for (const name of ["handleSubmit", "handleOpenAccount", "handleOpenSaved", "handleSaveAccount"]) {
+  for (const name of ["handleSubmit", "handleOpenAccount", "handleSaveAccount"]) {
     assert.doesNotMatch(componentFunction(name), /requestReading|fetch\(/, name);
   }
   assert.match(componentFunction("handleBaseReading"), /requestReading\(\{ \.\.\.birthInput, kind: "base" \}\)/);
