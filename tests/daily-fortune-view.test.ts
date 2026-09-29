@@ -65,3 +65,19 @@ test("저장 결과 가져오기는 계정 저장 목록을 읽고 직접 입력
   assert.match(source, /직접 입력으로 바꾸기/);
   assert.match(source, /sourceReadingId: mode === "saved" \? Number\(selectedId\) : null/);
 });
+
+test("생성 중 상태는 요청한 대기 문구를 보여주고 자동으로 상태를 다시 확인한다", () => {
+  const source = readFileSync(new URL("../app/daily-fortune-panel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /if \(status === "processing"\) return "오늘의 운세를 가져오는 중이에요\. 순서대로 준비 중이니 잠시만 기다려 주세요\.";/);
+  assert.match(source, /fortune\?\.status !== "processing" && fortune\?\.status !== "pending"/);
+  assert.match(source, /window\.setInterval\(\(\) => \{ void refreshFortune\(\); \}, 5000\)/);
+  assert.match(source, /className="daily-status" role="status"[\s\S]*statusText\(fortune\?\.status \?\? "pending"\)/);
+});
+
+test("생성 실패 상태는 요청한 실패 문구를 보여주고 준비된 결과처럼 표시하지 않는다", () => {
+  const source = readFileSync(new URL("../app/daily-fortune-panel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /if \(status === "failed"\) return "오늘의 운세를 준비하는 데 문제가 생겼어요\. 잠시 후 다시 확인해 주세요\.";/);
+  assert.match(source, /fortune\?\.status === "ready" && fortune\.fortune \? \([\s\S]*오늘의 운세 확인하기[\s\S]*\) : \([\s\S]*className="daily-status" role="status"/);
+});

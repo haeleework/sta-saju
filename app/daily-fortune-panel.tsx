@@ -17,10 +17,10 @@ type Mode = "direct" | "saved";
 
 function statusText(status: string): string {
   if (status === "pending") return "오늘의 운세를 오전 9시부터 순서대로 준비합니다.";
-  if (status === "processing") return "오늘의 운세를 준비 중입니다. 잠시 후 다시 확인해 주세요.";
+  if (status === "processing") return "오늘의 운세를 가져오는 중이에요. 순서대로 준비 중이니 잠시만 기다려 주세요.";
   if (status === "limited") return "오늘의 운세 생성 한도에 도달했습니다. 내일 다시 확인해 주세요.";
   if (status === "stale") return "내 사주 정보가 바뀌어 이전 운세를 보여주지 않습니다. 새 정보의 운세는 내일부터 준비됩니다.";
-  if (status === "failed") return "오늘의 운세를 만들지 못했습니다. 같은 날 AI를 다시 호출하지 않습니다.";
+  if (status === "failed") return "오늘의 운세를 준비하는 데 문제가 생겼어요. 잠시 후 다시 확인해 주세요.";
   return "오늘의 운세를 확인할 수 없습니다.";
 }
 
