@@ -5,7 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AuthView } from "../app/login-test-panel";
 import ServiceHome from "../app/service-home";
-import DailyFortunePanel from "../app/daily-fortune-panel";
+import DailyFortunePanel, { DailyFortuneResult } from "../app/daily-fortune-panel";
 
 const home = createElement(ServiceHome, { readingDisabled: false, view: "home", onViewChange: () => {} });
 const authProps = {
@@ -86,4 +86,36 @@ test("생성 실패 상태는 요청한 실패 문구를 보여주고 준비된 
 
   assert.match(source, /if \(status === "failed"\) return "오늘의 운세를 준비하는 데 문제가 생겼어요\. 잠시 후 다시 확인해 주세요\.";/);
   assert.match(source, /fortune\?\.status === "ready" && fortune\.fortune \? \([\s\S]*오늘의 운세 확인하기[\s\S]*\) : \([\s\S]*className="daily-status" role="status"/);
+});
+
+test("새 운세는 네 생활 영역을 보여주고 옛 운세는 기존 항목으로 읽는다", () => {
+  const topic = { reading: "오늘의 단서를 참고하며 한 가지를 살펴보세요.", tip: "작은 일부터 시작해 보세요." };
+  const reading = { summary: "오늘의 핵심", reason: "계산 근거", action: "첫 행동", details: { work: topic, people: topic, money: topic, pace: topic } };
+  const detailed = renderToStaticMarkup(createElement(DailyFortuneResult, { fortuneDate: "2026-09-30", reading }));
+  assert.match(detailed, /2026-09-30 · 오늘의 운세/);
+  for (const heading of ["일·공부", "사람·관계", "돈·소비", "생활 리듬"]) {
+    assert.ok(detailed.includes(heading));
+  }
+  assert.match(detailed, /오늘 가장 먼저 해볼 일[\s\S]*첫 행동/);
+  const legacy = renderToStaticMarkup(createElement(DailyFortuneResult, { fortuneDate: "2026-09-30", reading: { summary: "예전 핵심", reason: "예전 근거", action: "예전 행동" } }));
+  assert.match(legacy, /예전 핵심[\s\S]*예전 근거[\s\S]*예전 행동/);
+  assert.doesNotMatch(legacy, /daily-detail-grid/);
+});
+
+test("미리보기는 개발 환경에만 열리고 가상 문장으로 실제 결과를 변경하지 않는다", () => {
+  const source = readFileSync(new URL("../app/preview/daily-fortune/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /process\.env\.NODE_ENV !== "development"\) notFound\(\)/);
+  assert.match(source, /구성 시안 · 예시 사주/);
+  assert.match(source, /Gemini 생성 결과가 아닙니다/);
+  assert.doesNotMatch(source, /fetch\(|createAdminClient|GEMINI_API_KEY/);
+});
+
+test("실제 단서 결과는 이유·참고할 상황·행동과 펼칠 수 있는 계산 근거를 보여준다", () => {
+  const reading = { summary: "오늘의 핵심", clues: ["stem-role", "branch-role"].map((id) => ({ id, title: id, why: "주목할 이유", reference: "참고할 상황", action: "해볼 행동", evidence: "서버 계산 근거" })) };
+  const html = renderToStaticMarkup(createElement(DailyFortuneResult, { fortuneDate: "2026-09-30", reading }));
+  assert.match(html, /왜 주목할 만한가요/);
+  assert.match(html, /오늘 무엇에 참고할까요/);
+  assert.match(html, /이렇게 해보세요/);
+  assert.match(html, /<details><summary>계산 근거 자세히 보기<\/summary><p>서버 계산 근거/);
+  assert.doesNotMatch(html, /일·공부|돈·소비/);
 });

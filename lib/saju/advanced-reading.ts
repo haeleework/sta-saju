@@ -30,6 +30,12 @@ export type AdvancedReading = {
   summary: string;
 };
 
+export type DailySignals = {
+  stemRole: TenGodEntry;
+  branchRole: TenGodEntry;
+  natalPairs: PairRelation[];
+};
+
 const stemTraits: Record<string, { element: Element; polarity: Polarity }> = {
   甲: { element: "목", polarity: "양" }, 乙: { element: "목", polarity: "음" },
   丙: { element: "화", polarity: "양" }, 丁: { element: "화", polarity: "음" },
@@ -161,5 +167,41 @@ export function analyzeAdvancedReading(chart: SajuChart): AdvancedReading {
     tenGods,
     pairRelations,
     summary: describeSummary(tenGods, pairRelations),
+  };
+}
+
+export function analyzeDailySignals(chart: SajuChart, dailyGanZhi: string): DailySignals {
+  const [stem, branch, ...extra] = [...dailyGanZhi];
+  const branchBasis = branchMainStem[branch];
+  if (!stemTraits[stem] || !branchBasis || extra.length) {
+    throw new Error("오늘의 십성과 글자 관계를 계산할 수 없습니다.");
+  }
+  const dayStem = chart.pillars[2]?.stem;
+  if (!stemTraits[dayStem]) throw new Error("태어난 날의 중심 글자를 확인할 수 없습니다.");
+  const stemName = tenGod(dayStem, stem);
+  const branchName = tenGod(dayStem, branchBasis);
+  const natalPairs: PairRelation[] = [];
+  for (const pillar of chart.pillars) {
+    const candidates: { kind: PairRelation["kind"]; daily: string; natal: string; pairs: Set<string> }[] = [
+      { kind: "천간합", daily: stem, natal: pillar.stem, pairs: stemCombinations },
+      { kind: "지지합", daily: branch, natal: pillar.branch, pairs: branchCombinations },
+      { kind: "지지충", daily: branch, natal: pillar.branch, pairs: branchClashes },
+    ];
+    for (const candidate of candidates) {
+      if (!candidate.pairs.has(pairKey(candidate.daily, candidate.natal))) continue;
+      natalPairs.push({
+        kind: candidate.kind,
+        first: { pillarLabel: "오늘", character: candidate.daily },
+        second: { pillarLabel: pillar.label, character: candidate.natal },
+        easyMeaning: candidate.kind === "지지충"
+          ? "두 글자가 서로 다른 방향으로 움직이는 단서"
+          : "두 글자가 서로 연결되는 단서",
+      });
+    }
+  }
+  return {
+    stemRole: { pillarLabel: "오늘", position: "윗글자", character: stem, basisStem: stem, name: stemName, easyRole: TEN_GOD_EASY_ROLES[stemName] },
+    branchRole: { pillarLabel: "오늘", position: "아랫글자", character: branch, basisStem: branchBasis, name: branchName, easyRole: TEN_GOD_EASY_ROLES[branchName] },
+    natalPairs,
   };
 }

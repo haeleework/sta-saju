@@ -21,6 +21,41 @@ function statusText(status: string): string {
   return "오늘의 운세를 확인할 수 없습니다.";
 }
 
+export function DailyFortuneResult({ fortuneDate, reading }: { fortuneDate?: string; reading: DailyFortuneReading }) {
+  if (reading.clues) return <div className="daily-clue-result">
+    <div className="fortune-overview"><p className="step-kicker">{fortuneDate} · 오늘 눈에 띄는 흐름</p><h2>{reading.summary}</h2></div>
+    <div className="fortune-clues">{reading.clues.map((clue, index) => <article className="fortune-clue" key={clue.id}>
+      <div className="fortune-clue-heading"><span>{String(index + 1).padStart(2, "0")}</span><h2>{clue.title}</h2></div>
+      <div className="fortune-clue-body">
+        <section><h3>왜 주목할 만한가요?</h3><p>{clue.why}</p></section>
+        <section><h3>오늘 무엇에 참고할까요?</h3><p>{clue.reference}</p></section>
+        <section className="fortune-clue-action"><h3>이렇게 해보세요</h3><p>{clue.action}</p></section>
+        <details><summary>계산 근거 자세히 보기</summary><p>{clue.evidence}</p></details>
+      </div>
+    </article>)}</div>
+    <p className="fortune-clue-footer">사주 해석은 오늘을 돌아보기 위한 참고입니다. 실제 일정과 상황에 맞춰 골라 활용해 주세요.</p>
+  </div>;
+  const details = reading.details;
+  const topics = [
+    ["work", "일·공부"], ["people", "사람·관계"],
+    ["money", "돈·소비"], ["pace", "생활 리듬"],
+  ] as const;
+  return <div className="daily-result">
+    <p className="step-kicker">{fortuneDate} · 오늘의 운세</p>
+    <h3>{reading.summary}</h3>
+    <p><strong>오늘 이렇게 읽었어요</strong><br />{reading.reason}</p>
+    {details && <div className="daily-detail-grid">
+      {topics.map(([key, title]) => <section className="daily-detail" key={key}>
+        <h4>{title}</h4>
+        <p>{details[key].reading}</p>
+        <p className="daily-detail-tip"><strong>오늘 참고할 점</strong><br />{details[key].tip}</p>
+      </section>)}
+    </div>}
+    <p className="daily-main-action"><strong>오늘 가장 먼저 해볼 일</strong><br />{reading.action}</p>
+    <small>사주 해석은 참고와 자기 성찰을 위한 내용이며, 미래를 확정하지 않습니다.</small>
+  </div>;
+}
+
 export default function DailyFortunePanel() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [fortune, setFortune] = useState<FortuneState | null>(null);
@@ -182,7 +217,7 @@ export default function DailyFortunePanel() {
           {fortune?.status === "ready" && fortune.fortune ? (
             <>
               <button className="primary-button" type="button" onClick={() => setShowResult((value) => !value)}>{showResult ? "운세 닫기" : "오늘의 운세 확인하기"}<span>→</span></button>
-              {showResult && <div className="daily-result"><p className="step-kicker">{fortune.fortuneDate} · 오늘의 운세</p><h3>{fortune.fortune.summary}</h3><p><strong>이렇게 읽었어요</strong><br />{fortune.fortune.reason}</p><p><strong>오늘 해볼 일</strong><br />{fortune.fortune.action}</p><small>사주 해석은 참고와 자기 성찰을 위한 내용이며, 미래를 확정하지 않습니다.</small></div>}
+              {showResult && <DailyFortuneResult fortuneDate={fortune.fortuneDate} reading={fortune.fortune} />}
             </>
           ) : (
             <div className="daily-status" role="status"><p>{statusText(fortune?.status ?? "pending")}</p><button type="button" onClick={() => void refreshFortune()}>상태 다시 확인</button></div>

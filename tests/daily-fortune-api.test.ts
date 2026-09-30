@@ -46,7 +46,8 @@ test("예약 API는 비밀값 없거나 다르면 거부하고 인증 뒤에만 
 test("Gemini 요청은 DB 선점에 성공한 후에만 시작하고 실패 문장을 꾸며내지 않는다", () => {
   assert.match(generator, /admin\.rpc\("claim_saju_daily_fortune"/);
   assert.ok(generator.indexOf("claim !== \"claimed\"") < generator.indexOf("fetch(geminiUrl"));
-  assert.match(generator, /parseDailyFortune\(JSON\.parse\(output\)\)/);
+  assert.match(generator, /parseGeneratedDailyFortune\(JSON\.parse\(output\), facts\)/);
+  assert.match(generator, /maxOutputTokens: 2048/);
   assert.match(generator, /admin\.rpc\("complete_saju_daily_fortune"/);
   assert.match(generator, /p_profile_token: profile\.profile_token/);
   assert.match(generator, /if \(saveError \|\| saved !== true\) return "profile_changed"/);
