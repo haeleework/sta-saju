@@ -1,6 +1,7 @@
 import lunar from "lunar-javascript";
 import { calculate, type SajuChart } from "./chart";
 import { calculateFortuneCycles, type FortuneGender, type FortunePeriod, type AnnualFortune, type FortuneRelation } from "./fortune-cycles";
+import { analyzeDailySignals, type DailySignals } from "./advanced-reading";
 
 const { Solar } = lunar;
 type Element = "목" | "화" | "토" | "금" | "수";
@@ -13,7 +14,11 @@ const controls: Record<Element, Element> = { 목: "토", 화: "금", 토: "수",
 
 export type DailyProfileInput = { date: string; time: string; gender: FortuneGender };
 export const DAILY_LIMIT = 30;
-export type DailyFortuneReading = { summary: string; reason: string; action: string };
+export type DailyFortuneTopic = { reading: string; tip: string };
+export type DailyFortuneDetails = Record<"work" | "people" | "money" | "pace", DailyFortuneTopic>;
+export type DailyFortuneClue = { id: string; title: string; why: string; reference: string; action: string; evidence: string };
+export type DailyFortuneReading = { summary: string; reason?: string; action?: string; details?: DailyFortuneDetails; clues?: DailyFortuneClue[] };
+export type SelectedDailyClue = { id: string; evidence: string };
 export type DailyFortuneFacts = {
   fortuneDate: string;
   chart: SajuChart;
@@ -22,6 +27,7 @@ export type DailyFortuneFacts = {
   dailyGanZhi: string;
   dailyStemRelation: FortuneRelation;
   dailyBranchRelation: FortuneRelation;
+  dailySignals: DailySignals;
 };
 
 export function kstDate(now: Date): string {
@@ -70,30 +76,102 @@ export function calculateDailyFortuneFacts(profile: DailyProfileInput, fortuneDa
     dailyGanZhi,
     dailyStemRelation: relation(dayElement, elementOf(stem)),
     dailyBranchRelation: relation(dayElement, elementOf(branch)),
+    dailySignals: analyzeDailySignals(chart, dailyGanZhi),
   };
 }
 
-export function parseDailyFortune(value: unknown): DailyFortuneReading | null {
+function cleanText(value: unknown, maxLength = 500): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.trim();
+  return cleaned && cleaned.length <= maxLength ? cleaned : null;
+}
+
+export function parseDailyFortune(value: unknown, requireDetails = false): DailyFortuneReading | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
-  if (!["summary", "reason", "action"].every((key) => typeof item[key] === "string" && (item[key] as string).trim().length > 0 && (item[key] as string).length <= 500)) return null;
-  return {
-    summary: (item.summary as string).trim(),
-    reason: (item.reason as string).trim(),
-    action: (item.action as string).trim(),
-  };
+  const summary = cleanText(item.summary);
+  if (!summary) return null;
+  if (item.clues !== undefined) {
+    if (!Array.isArray(item.clues) || item.clues.length < 2 || item.clues.length > 3) return null;
+    const clues: DailyFortuneClue[] = [];
+    for (const raw of item.clues) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+      const clue = raw as Record<string, unknown>;
+      const values = ["id", "title", "why", "reference", "action", "evidence"].map((key) => cleanText(clue[key]));
+      if (values.some((text) => !text)) return null;
+      const [id, title, why, reference, action, evidence] = values as string[];
+      if (clues.some((entry) => entry.id === id)) return null;
+      clues.push({ id, title, why, reference, action, evidence });
+    }
+    return { summary, clues };
+  }
+  const reason = cleanText(item.reason);
+  const action = cleanText(item.action);
+  if (!summary || !reason || !action) return null;
+  const result: DailyFortuneReading = { summary, reason, action };
+  if (item.details === undefined) return requireDetails ? null : result;
+  if (!item.details || typeof item.details !== "object" || Array.isArray(item.details)) return null;
+  const detailValues = item.details as Record<string, unknown>;
+  const details = {} as DailyFortuneDetails;
+  for (const key of ["work", "people", "money", "pace"] as const) {
+    const topic = detailValues[key];
+    if (!topic || typeof topic !== "object" || Array.isArray(topic)) return null;
+    const reading = cleanText((topic as Record<string, unknown>).reading);
+    const tip = cleanText((topic as Record<string, unknown>).tip);
+    if (!reading || !tip || (requireDetails && reading.length < 15)) return null;
+    details[key] = { reading, tip };
+  }
+  result.details = details;
+  return result;
+}
+
+export function selectDailyClues(facts: DailyFortuneFacts): SelectedDailyClue[] {
+  const { stemRole, branchRole, natalPairs } = facts.dailySignals;
+  const selected = [{ id: "stem-role", evidence: `오늘 천간 ${stemRole.character}의 십성은 ${stemRole.name}: ${stemRole.easyRole}.` }];
+  if (stemRole.name !== branchRole.name) {
+    selected.push({ id: "branch-role", evidence: `오늘 지지 ${branchRole.character}의 본기 ${branchRole.basisStem}의 십성은 ${branchRole.name}: ${branchRole.easyRole}.` });
+  } else {
+    selected[0].evidence += ` 오늘 지지 ${branchRole.character}의 본기 ${branchRole.basisStem}도 같은 ${branchRole.name}입니다.`;
+    selected.push({ id: "background", evidence: `오늘의 역할 ${stemRole.name}(${stemRole.easyRole})을 긴 배경과 함께 봅니다. 대운 ${facts.period?.ganZhi || "없음"}: ${facts.period?.stemRelation?.label || "해당 정보 없음"}. 세운 ${facts.annual?.ganZhi || "없음"}: ${facts.annual?.stemRelation.label || "해당 정보 없음"}. 긴 흐름은 오늘의 사건을 뜻하지 않습니다.` });
+  }
+  // 충을 먼저, 다음은 합. 같은 종류의 여러 위치는 한 단서로 묶습니다.
+  const pairKind = (["지지충", "천간합", "지지합"] as const).find((kind) => natalPairs.some((pair) => pair.kind === kind));
+  if (pairKind) {
+    selected.push({ id: "natal-pair", evidence: natalPairs.filter((pair) => pair.kind === pairKind).map((pair) => `오늘 ${pair.first.character}와 ${pair.second.pillarLabel} ${pair.second.character}: ${pair.kind}, ${pair.easyMeaning}`).join(". ") });
+  }
+  return selected;
+}
+
+export function parseGeneratedDailyFortune(value: unknown, facts: DailyFortuneFacts): DailyFortuneReading | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  const selected = selectDailyClues(facts);
+  if (!Array.isArray(item.clues) || item.clues.length !== selected.length) return null;
+  const enriched = item.clues.map((raw, index) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const clue = raw as Record<string, unknown>;
+    return clue.id === selected[index].id ? { ...clue, evidence: selected[index].evidence } : null;
+  });
+  return parseDailyFortune({ summary: item.summary, clues: enriched });
 }
 
 export function buildDailyFortunePrompt(facts: DailyFortuneFacts): string {
   return [
     "당신은 사주를 처음 보는 초등학생도 이해할 수 있게 쉬운 존댓말로 설명합니다.",
-    "아래 계산 사실을 바꾸지 말고 오늘의 참고용 해석을 작성하세요. 미래 사건을 단정하거나 건강·금전 결정을 지시하지 마세요.",
-    "JSON으로 summary(오늘의 관점), reason(계산 근거를 쉬운 말로), action(오늘 해볼 작은 행동)을 각각 1~2문장으로 작성하세요.",
+    "아래 계산 사실만 근거로 오늘 실제로 참고할 만한 해석을 작성하세요. 계산값을 다시 만들거나 제공하지 않은 합·충·형·해·파, 삼합을 지어내지 마세요.",
+    "JSON 형식으로 쉬운 한국어를 작성하세요. summary는 오늘의 핵심 2문장, clues는 아래 선택된 단서를 같은 개수·순서·id로 해석한 배열입니다.",
+    "각 clue에 id, title(쉬운 제목), why(왜 주목할 만한지 2~3문장), reference(오늘 어떤 실제 상황에 참고할지 2~3문장), action(오늘 해볼 구체적 행동 1문장)을 작성하세요. evidence는 서버가 붙이므로 출력하지 마세요.",
+    "고정된 생활 분야를 억지로 채우지 말고 선택된 단서마다 가장 관련 있는 상황을 설명하세요. 같은 의미나 행동을 여러 단서에서 반복하지 마세요. background는 오늘의 단서를 대운·세운과 연결하는 맥락으로만 설명하세요.",
+    "대운과 세운은 긴 배경이며 오늘의 십성·합충과 구별하세요. 합·충은 사건 확정이 아닌 전통적인 참고 단서입니다. 돈벌이·손실, 질병·컨디션을 예언하거나 투자·의료 결정을 지시하지 마세요.",
     `한국 날짜: ${facts.fortuneDate}`,
+    `선택된 단서: ${JSON.stringify(selectDailyClues(facts))}`,
     `태어난 날의 중심 글자: ${facts.chart.dayMaster.character}(${facts.chart.dayMaster.korean}, ${facts.chart.dayMaster.element})`,
     `사주 8글자: ${facts.chart.pillars.map((item) => item.text).join(" ")}`,
-    `대운(약 10년 흐름): ${facts.period?.ganZhi ?? "해당 기간 없음"}`,
-    `세운(올해 흐름): ${facts.annual?.ganZhi ?? "해당 기간 없음"}`,
+    `대운(약 10년 흐름): ${facts.period?.ganZhi ?? "해당 기간 없음"}, 위 글자 ${facts.period?.stemRelation?.label ?? "정보 없음"}, 아래 글자 ${facts.period?.branchRelation?.label ?? "정보 없음"}`,
+    `세운(올해 흐름): ${facts.annual?.ganZhi ?? "해당 기간 없음"}, 위 글자 ${facts.annual?.stemRelation.label ?? "정보 없음"}, 아래 글자 ${facts.annual?.branchRelation.label ?? "정보 없음"}`,
     `일운(오늘 흐름): ${facts.dailyGanZhi}, 위 글자 ${facts.dailyStemRelation.label}, 아래 글자 ${facts.dailyBranchRelation.label}`,
+    `오늘 윗글자 십성: ${facts.dailySignals.stemRole.name}(${facts.dailySignals.stemRole.easyRole})`,
+    `오늘 아랫글자 본기 ${facts.dailySignals.branchRole.basisStem}의 십성: ${facts.dailySignals.branchRole.name}(${facts.dailySignals.branchRole.easyRole})`,
+    `오늘과 태어난 사주의 글자 관계: ${facts.dailySignals.natalPairs.length ? facts.dailySignals.natalPairs.map((pair) => `${pair.kind} ${pair.first.character}-${pair.second.pillarLabel} ${pair.second.character}(${pair.easyMeaning})`).join(", ") : "이 범위의 천간합·지지합·지지충 없음"}`,
   ].join("\n");
 }

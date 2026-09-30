@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "../supabase/admin";
-import { buildDailyFortunePrompt, calculateDailyFortuneFacts, kstDate, parseDailyFortune, type DailyProfileInput } from "./daily-fortune";
+import { buildDailyFortunePrompt, calculateDailyFortuneFacts, kstDate, parseGeneratedDailyFortune, type DailyProfileInput } from "./daily-fortune";
 import { READING_MODEL } from "./reading";
 
 export type DailyProfileRow = {
@@ -15,14 +15,18 @@ export type DailyProfileRow = {
 };
 
 const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${READING_MODEL}:generateContent`;
+const clueSchema = {
+  type: "OBJECT",
+  properties: { id: { type: "STRING" }, title: { type: "STRING" }, why: { type: "STRING" }, reference: { type: "STRING" }, action: { type: "STRING" } },
+  required: ["id", "title", "why", "reference", "action"],
+};
 const dailySchema = {
   type: "OBJECT",
   properties: {
     summary: { type: "STRING" },
-    reason: { type: "STRING" },
-    action: { type: "STRING" },
+    clues: { type: "ARRAY", items: clueSchema, minItems: 2, maxItems: 3 },
   },
-  required: ["summary", "reason", "action"],
+  required: ["summary", "clues"],
 };
 
 export async function generateDailyFortune(profile: DailyProfileRow, today = kstDate(new Date())): Promise<string> {
@@ -61,7 +65,7 @@ export async function generateDailyFortune(profile: DailyProfileRow, today = kst
         contents: [{ parts: [{ text: buildDailyFortunePrompt(facts) }] }],
         generationConfig: {
           responseFormat: { text: { mimeType: "APPLICATION_JSON", schema: dailySchema } },
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
         },
       }),
       signal: AbortSignal.timeout(30000),
@@ -74,7 +78,7 @@ export async function generateDailyFortune(profile: DailyProfileRow, today = kst
         ?.map((part: { text?: unknown }) => part.text)
         .filter((part: unknown): part is string => typeof part === "string")
         .join("");
-      result = output ? parseDailyFortune(JSON.parse(output)) : null;
+      result = output ? parseGeneratedDailyFortune(JSON.parse(output), facts) : null;
       if (!result) errorCode = "invalid_response";
     }
   } catch {
